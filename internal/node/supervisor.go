@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -261,9 +262,9 @@ func (s *Supervisor) ensureNetwork(ctx context.Context) error {
 	if err != nil || ok {
 		return err
 	}
-	ip, ipnet, _ := net.ParseCIDR(subnet)
+	_, ipnet, _ := net.ParseCIDR(subnet)
 	for range 30 {
-		gw := ip.To4()
+		gw := slices.Clone(ipnet.IP.To4())
 		gw[3] = 1
 		err = s.pc.CreateNetwork(ctx, NetworkName, ipnet.String(), gw.String())
 		if !errors.Is(err, podman.ErrSubnetInUse) {
@@ -272,9 +273,8 @@ func (s *Supervisor) ensureNetwork(ctx context.Context) error {
 			}
 			return err
 		}
-		ip = ipnet.IP.To4()
-		ip[2]++
-		ipnet.IP = ip
+		ipnet.IP = slices.Clone(ipnet.IP.To4())
+		ipnet.IP[2]++
 	}
 	return fmt.Errorf("no free subnet for %s: %w", NetworkName, err)
 }

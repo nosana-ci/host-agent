@@ -79,9 +79,10 @@ func (c *Client) InspectImage(ctx context.Context, ref string) (*Image, error) {
 	return &img, c.call(ctx, http.MethodGet, "/images/"+url.PathEscape(ref)+"/json", nil, nil, &img)
 }
 
-// Pull pulls ref and returns the image ID.
+// Pull pulls ref and returns the image ID. Progress is streamed (not quiet), so the answer's
+// headers arrive at once and a long pull does not run into the header timeout.
 func (c *Client) Pull(ctx context.Context, ref string) (string, error) {
-	q := url.Values{"reference": {ref}, "policy": {"always"}, "quiet": {"true"}}
+	q := url.Values{"reference": {ref}, "policy": {"always"}}
 	resp, err := c.do(ctx, http.MethodPost, "/images/pull", q, nil)
 	if err != nil {
 		return "", err
@@ -94,8 +95,9 @@ func (c *Client) Pull(ctx context.Context, ref string) (string, error) {
 	dec := json.NewDecoder(resp.Body)
 	for {
 		var msg struct {
-			Error string `json:"error"`
-			ID    string `json:"id"`
+			Error  string   `json:"error"`
+			ID     string   `json:"id"`
+			Images []string `json:"images"`
 		}
 		if err := dec.Decode(&msg); err == io.EOF {
 			return id, nil
@@ -107,6 +109,8 @@ func (c *Client) Pull(ctx context.Context, ref string) (string, error) {
 		}
 		if msg.ID != "" {
 			id = msg.ID
+		} else if len(msg.Images) > 0 {
+			id = msg.Images[0]
 		}
 	}
 }

@@ -56,7 +56,8 @@ func Run(ctx context.Context, o Options, out io.Writer) error {
 			return err
 		}
 	}
-	_ = os.Chmod(config.AgentDir, 0o700)
+	// Traversable, not listable: the CLI symlink resolves for every user, the files inside stay private.
+	_ = os.Chmod(config.AgentDir, 0o711)
 	_ = os.Chmod(config.NodeDir, 0o700)
 
 	self, err := os.Executable()
