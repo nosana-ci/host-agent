@@ -1,0 +1,47 @@
+# Tests on every change; a tag v<version> builds linux-amd64, builds the runtime bundle, uploads
+# both to this project's generic package registry, and publishes the signed manifest to
+# host-manager, all in one job.
+#
+# CI variables: RELEASE_SIGNING_KEY (masked; the base64 ed25519 seed), RELEASE_PUBLIC_KEY,
+# HOST_MANAGER_URL, NODE_IMAGE (the node image this release runs).
+
+image: golang:1.27
+
+stages: [test, release]
+
+variables:
+  RUNTIME_VERSION: "5.8.8"
+
+test:
+  stage: test
+  script:
+    - go vet ./...
+    - go test ./...
+  rules:
+    - if: $CI_MERGE_REQUEST_ID
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
+
+release:
+  stage: release
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq gpg curl
+  script:
+    - export VERSION="${CI_COMMIT_TAG#v}"
+    - make build VERSION="$VERSION" RELEASE_PUBLIC_KEY="$RELEASE_PUBLIC_KEY"
+    - make runtime RUNTIME="$RUNTIME_VERSION"
+    - export REGISTRY="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/nosana-host/${VERSION}"
+    - export RUNTIME_FILE="nosana-runtime-${RUNTIME_VERSION}-linux-amd64.tar.gz"
+    - 'curl -fsS --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file bin/nosana-host "$REGISTRY/nosana-host-linux-amd64"'
+    - 'curl -fsS --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file "bin/$RUNTIME_FILE" "$REGISTRY/$RUNTIME_FILE"'
+    - go run ./cmd/nosana-host-publish
+        --version "$VERSION"
+        --agent "$REGISTRY/nosana-host-linux-amd64" --agent-sha "$(sha256sum bin/nosana-host | cut -d' ' -f1)"
+        --runtime-version "$RUNTIME_VERSION"
+        --runtime "$REGISTRY/$RUNTIME_FILE" --runtime-sha "$(sha256sum "bin/$RUNTIME_FILE" | cut -d' ' -f1)"
+        --node-image "$NODE_IMAGE"
+        --host-manager "$HOST_MANAGER_URL"
+  artifacts:
+    paths: [bin/]
