@@ -1,0 +1,118 @@
+// nosana-host is the Nosana host agent: a root systemd service that runs the Nosana node in its
+// own podman and reports to host-manager, plus the install and status commands.
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"log/slog"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/nosana-ci/nosana-host/internal/config"
+	"github.com/nosana-ci/nosana-host/internal/daemon"
+	"github.com/nosana-ci/nosana-host/internal/install"
+	"github.com/nosana-ci/nosana-host/internal/keys"
+	"github.com/nosana-ci/nosana-host/internal/node"
+	"github.com/nosana-ci/nosana-host/internal/podman"
+	"github.com/nosana-ci/nosana-host/internal/store"
+	"github.com/nosana-ci/nosana-host/internal/version"
+)
+
+const usage = `nosana-host runs the Nosana node on this machine and reports to host-manager.
+
+Usage:
+  nosana-host install --control-url URL --network mainnet|devnet [--token T]   install or repair (sudo)
+  nosana-host uninstall [--purge]       remove the services; --purge also deletes state after backing the wallet up
+  nosana-host status                    what the agent knows: node address, link, node container
+  nosana-host daemon                    run the agent (what the service runs)
+  nosana-host version
+`
+
+func main() {
+	if len(os.Args) < 2 {
+		fmt.Fprint(os.Stderr, usage)
+		os.Exit(2)
+	}
+	var err error
+	switch os.Args[1] {
+	case "install":
+		err = cmdInstall(os.Args[2:])
+	case "uninstall":
+		fs := flag.NewFlagSet("uninstall", flag.ExitOnError)
+		purge := fs.Bool("purge", false, "also delete state and config")
+		_ = fs.Parse(os.Args[2:])
+		err = install.Uninstall(context.Background(), *purge, os.Stdout)
+	case "status":
+		err = cmdStatus()
+	case "daemon":
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+		defer stop()
+		err = daemon.Run(ctx)
+	case "version", "--version", "-v":
+		fmt.Printf("nosana-host %s %s\n", version.Version, version.Commit)
+	default:
+		fmt.Fprint(os.Stderr, usage)
+		os.Exit(2)
+	}
+	if err != nil {
+		slog.Error(err.Error())
+		os.Exit(1)
+	}
+}
+
+func cmdInstall(args []string) error {
+	fs := flag.NewFlagSet("install", flag.ExitOnError)
+	var o install.Options
+	fs.StringVar(&o.ControlURL, "control-url", "", "host-manager URL")
+	fs.StringVar(&o.Network, "network", "", "mainnet or devnet")
+	fs.StringVar(&o.Token, "token", "", "claim token from the console's install command")
+	_ = fs.Parse(args)
+	return install.Run(context.Background(), o, os.Stdout)
+}
+
+func cmdStatus() error {
+	cfg, err := config.Load()
+	if err != nil {
+		return errors.New("nosana-host is not installed")
+	}
+	st, err := store.Open(config.StatePath)
+	if err != nil {
+		return err
+	}
+	wallet, err := keys.Wallet(config.WalletPath)
+	if err != nil {
+		return err
+	}
+	s := st.State()
+	fmt.Printf("agent       %s\nhost-manager %s (%s)\nnode address %s\n", version.Version, cfg.ControlURL, cfg.Network, keys.Address(wallet))
+	switch {
+	case s.Claimed && s.LastHeartbeatAt != nil:
+		fmt.Printf("linked      yes, last heartbeat %s ago\n", time.Since(*s.LastHeartbeatAt).Round(time.Second))
+	case s.Claimed:
+		fmt.Println("linked      yes, no heartbeat yet")
+	default:
+		fmt.Println("linked      no; run the install command from the console")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	ctr, err := podman.New(config.PodmanSocket).InspectContainer(ctx, node.ContainerName)
+	switch {
+	case errors.Is(err, podman.ErrNotFound):
+		fmt.Println("node        no container yet")
+	case err != nil:
+		fmt.Printf("node        podman not reachable (%v)\n", err)
+	default:
+		fmt.Printf("node        %s (%s)\n", ctr.State.Status, ctr.Config.Labels["io.nosana.host.image"])
+	}
+	if s.Update.LastRollback != "" || s.Update.Pending != nil {
+		raw, _ := json.Marshal(s.Update)
+		fmt.Printf("update      %s\n", raw)
+	}
+	return nil
+}
