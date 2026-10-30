@@ -72,6 +72,7 @@ func Run(ctx context.Context) error {
 		cfg: cfg, st: st, pc: pc, sup: sup,
 		upd:  updater.New(cfg, st, sup, pc),
 		ctrl: control.New(cfg.ControlURL, wallet, device),
+		gpu:  api.GpuStatus{Gpus: []api.Gpu{}}, // host-manager wants an array before the first detection too
 	}
 	slog.Info("nosana-host", "version", version.Version, "node", keys.Address(wallet), "control", cfg.ControlURL)
 
