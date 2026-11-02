@@ -216,7 +216,6 @@ func (u *Updater) commit() {
 // bundle when podman does not come up.
 func (u *Updater) switchRuntime(ctx context.Context, ver, old string) error {
 	if err := u.activate(ctx, ver); err == nil {
-
 		slog.Info("runtime switched", "from", old, "to", ver)
 		bundle.Prune(old)
 		return nil
@@ -227,9 +226,7 @@ func (u *Updater) switchRuntime(ctx context.Context, ver, old string) error {
 		}
 		return ctx.Err()
 	}
-
 	slog.Warn("runtime did not come up; going back", "failed", ver, "to", old)
-
 	_ = u.st.Update(func(s *store.State) { s.Update.BlockedRuntime = append(s.Update.BlockedRuntime, ver) })
 	if old == "" {
 		return fmt.Errorf("runtime %s does not start and there is nothing to go back to", ver)
