@@ -14,7 +14,7 @@ import (
 	"github.com/nosana-ci/host-agent/internal/keys"
 )
 
-// A test host-manager that checks the SDK authorization header the way the real one does.
+// A test host-manager that answers requests whose authorization header names this wallet.
 func server(t *testing.T, wallet ed25519.PrivateKey, handle http.HandlerFunc) *Client {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		parts := strings.Split(r.Header.Get("Authorization"), ":")
@@ -28,7 +28,7 @@ func server(t *testing.T, wallet ed25519.PrivateKey, handle http.HandlerFunc) *C
 	return New(srv.URL, wallet)
 }
 
-func TestHeartbeatIsSignedWithTheWalletAndReturnsCommands(t *testing.T) {
+func TestHeartbeatReturnsCommands(t *testing.T) {
 	_, wallet, _ := ed25519.GenerateKey(rand.Reader)
 	c := server(t, wallet, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/agent/heartbeat" {
