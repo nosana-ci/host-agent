@@ -101,9 +101,9 @@ func Run(ctx context.Context, o Options, out io.Writer) (err error) {
 		say("warning: %v", err)
 	}
 	// A podman restart can break a running job: only when what it runs changed.
-	podman := "start"
+	podmanAction := "start"
 	if bundle.Current() == "" {
-		podman = "restart"
+		podmanAction = "restart"
 		ver, err := bundle.Install(ctx, m)
 		if err != nil {
 			return fmt.Errorf("install the container runtime: %w", err)
@@ -138,9 +138,10 @@ func Run(ctx context.Context, o Options, out io.Writer) (err error) {
 		return err
 	}
 	if changed {
-		podman = "restart"
+		podmanAction = "restart"
 	}
-	for _, args := range [][]string{{"daemon-reload"}, {"enable", service.PodmanUnit, service.AgentUnit}, {podman, service.PodmanUnit}, {"restart", service.AgentUnit}} {
+	for _, args := range [][]string{{"daemon-reload"}, {"enable", service.PodmanUnit, service.AgentUnit}, {podmanAction, service.PodmanUnit}, {"restart", service.AgentUnit}} {
+
 		if err := service.Systemctl(args...); err != nil {
 			return err
 		}
