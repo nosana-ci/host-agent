@@ -182,6 +182,9 @@ func (u *Updater) installAgent(ctx context.Context, m *manifest.Manifest) error 
 	// A binary that cannot run here could not roll itself back: try it before switching.
 	out, err := exec.CommandContext(ctx, dst, "version").CombinedOutput()
 	if err != nil || !strings.Contains(string(out), m.Version) {
+		if ctx.Err() != nil { // a stop mid-test says nothing about the binary
+			return ctx.Err()
+		}
 		_ = u.st.Update(func(s *store.State) { s.Update.Blocked = append(s.Update.Blocked, m.Version) })
 		return fmt.Errorf("agent %s does not run here (%v: %s); not switching to it", m.Version, err, strings.TrimSpace(string(out)))
 	}
@@ -216,7 +219,15 @@ func (u *Updater) switchRuntime(ctx context.Context, ver, old string) error {
 		bundle.Prune(old)
 		return nil
 	}
+	if ctx.Err() != nil { // a stop mid-switch says nothing about the runtime
+		if old != "" {
+			_ = u.activate(ctx, old)
+		}
+		return ctx.Err()
+	}
+
 	slog.Warn("runtime did not come up; going back", "failed", ver, "to", old)
+
 	_ = u.st.Update(func(s *store.State) { s.Update.BlockedRuntime = append(s.Update.BlockedRuntime, ver) })
 	if old == "" {
 		return fmt.Errorf("runtime %s does not start and there is nothing to go back to", ver)
