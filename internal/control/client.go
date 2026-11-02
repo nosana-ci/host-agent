@@ -32,18 +32,17 @@ type HTTPError struct {
 func (e *HTTPError) Error() string { return fmt.Sprintf("HTTP %d: %s", e.Status, e.Message) }
 
 type Client struct {
-	base    string
-	address string
-	wallet  ed25519.PrivateKey
-	http    *http.Client
+	base string
+	auth string // address:signature, the fixed part of the authorization header
+	http *http.Client
 }
 
 func New(controlURL string, wallet ed25519.PrivateKey) *Client {
+	address := keys.Address(wallet)
 	return &Client{
-		base:    strings.TrimRight(controlURL, "/"),
-		address: keys.Address(wallet),
-		wallet:  wallet,
-		http:    &http.Client{Timeout: 40 * time.Second}, // above the 25 s long-poll
+		base: strings.TrimRight(controlURL, "/"),
+		auth: address + ":" + keys.Base58(ed25519.Sign(wallet, []byte(address))),
+		http: &http.Client{Timeout: 40 * time.Second}, // above the 25 s long-poll
 	}
 }
 
@@ -87,8 +86,8 @@ func (c *Client) signed(ctx context.Context, method, path string, body, out any)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	sig := ed25519.Sign(c.wallet, []byte(c.address))
-	req.Header.Set("Authorization", c.address+":"+keys.Base58(sig)+":"+strconv.FormatInt(time.Now().UnixMilli(), 10))
+	req.Header.Set("Authorization", c.auth+":"+strconv.FormatInt(time.Now().UnixMilli(), 10))
+
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return err
