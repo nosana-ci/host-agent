@@ -188,6 +188,9 @@ func (s *Supervisor) reconcile(ctx context.Context) error {
 		s.mu.Unlock()
 		return s.pc.StartContainer(ctx, ContainerName)
 	case image != "" && (ctr.Config.Labels[LabelImage] != image || ctr.Config.Labels[labelNetwork] != s.network) && !s.Busy():
+		if err := s.ensureImage(ctx, image); err != nil { // the node keeps running during the pull
+			return err
+		}
 		slog.Info("node: recreating", "image", image, "network", s.network)
 		if err := s.pc.RemoveContainer(ctx, ContainerName); err != nil {
 			return err
@@ -242,15 +245,8 @@ func (s *Supervisor) create(ctx context.Context, image string) error {
 	if image == "" {
 		return errors.New("no node image known yet; waiting for the release manifest")
 	}
-	exists, err := s.pc.ImageExists(ctx, image)
-	if err != nil {
+	if err := s.ensureImage(ctx, image); err != nil {
 		return err
-	}
-	if !exists {
-		slog.Info("node: pulling image", "image", image)
-		if err := s.pc.Pull(ctx, image); err != nil {
-			return err
-		}
 	}
 	spec := podman.Spec{
 		Name:    ContainerName,
@@ -271,6 +267,15 @@ func (s *Supervisor) create(ctx context.Context, image string) error {
 	}
 	slog.Info("node: created and starting", "image", image)
 	return s.pc.StartContainer(ctx, ContainerName)
+}
+
+func (s *Supervisor) ensureImage(ctx context.Context, image string) error {
+	exists, err := s.pc.ImageExists(ctx, image)
+	if err != nil || exists {
+		return err
+	}
+	slog.Info("node: pulling image", "image", image)
+	return s.pc.Pull(ctx, image)
 }
 
 // ensureNetwork creates the node network. The node only looks it up by name, so when the usual
