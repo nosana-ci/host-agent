@@ -72,35 +72,23 @@ func (c *Client) Report(ctx context.Context, id int, result api.CommandResult) e
 // signed sends a request with the SDK authorization header: the address, the base58 signature
 // over it with the node wallet, and the time in milliseconds.
 func (c *Client) signed(ctx context.Context, method, path string, body, out any) error {
-	req, err := c.request(ctx, method, path, body)
-	if err != nil {
-		return err
-	}
-	sig := ed25519.Sign(c.wallet, []byte(c.address))
-	req.Header.Set("Authorization", c.address+":"+keys.Base58(sig)+":"+strconv.FormatInt(time.Now().UnixMilli(), 10))
-	return c.do(req, out)
-}
-
-func (c *Client) request(ctx context.Context, method, path string, body any) (*http.Request, error) {
 	var rd io.Reader
 	if body != nil {
 		raw, err := json.Marshal(body)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		rd = bytes.NewReader(raw)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, c.base+path, rd)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	return req, nil
-}
-
-func (c *Client) do(req *http.Request, out any) error {
+	sig := ed25519.Sign(c.wallet, []byte(c.address))
+	req.Header.Set("Authorization", c.address+":"+keys.Base58(sig)+":"+strconv.FormatInt(time.Now().UnixMilli(), 10))
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return err
