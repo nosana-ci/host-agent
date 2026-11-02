@@ -40,7 +40,7 @@ type Updater struct {
 	apply  sync.Mutex // one Check applies at a time: Run and the commands may call it together
 	mu     sync.Mutex
 	status api.UpdateStatus
-	ready  bool // a new agent is linked in and waits for Exec
+	ready  string // the agent version installAgent linked in, waiting for Exec
 }
 
 func New(cfg config.Config, st *store.Store, sup *node.Supervisor, pc *podman.Client) *Updater {
@@ -153,10 +153,10 @@ func (u *Updater) Check(ctx context.Context, force bool) (string, error) {
 // It does not return then; the node keeps running.
 func (u *Updater) Exec() {
 	u.mu.Lock()
-	ready := u.ready
+	to := u.ready
 	u.mu.Unlock()
-	if ready {
-		slog.Info("switching to agent", "to", binVersion(mustReadlink(config.CurrentBinary)))
+	if to != "" {
+		slog.Info("switching to agent", "to", to)
 		execSelf()
 	}
 }
@@ -190,7 +190,7 @@ func (u *Updater) installAgent(ctx context.Context, m *manifest.Manifest) error 
 		return err
 	}
 	u.mu.Lock()
-	u.ready = true
+	u.ready = m.Version
 	u.mu.Unlock()
 	return nil
 }

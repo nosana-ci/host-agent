@@ -71,8 +71,3 @@ func pruneBinaries(previous string) {
 }
 
 func binVersion(path string) string { return strings.TrimPrefix(filepath.Base(path), "nosana-host-") }
-
-func mustReadlink(link string) string {
-	target, _ := filepath.EvalSymlinks(link)
-	return target
-}
