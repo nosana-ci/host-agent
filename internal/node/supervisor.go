@@ -49,6 +49,7 @@ type Supervisor struct {
 	status    api.NodeStatus
 	image     string
 	restart   bool
+	start     bool // start an exited node at once, without the crash backoff
 	crashes   int
 	nextStart time.Time
 }
@@ -94,7 +95,7 @@ func (s *Supervisor) want(stopped, restart bool) error {
 		return err
 	}
 	s.mu.Lock()
-	s.restart, s.crashes, s.nextStart = restart, 0, time.Time{}
+	s.restart, s.start, s.crashes, s.nextStart = restart, !stopped, 0, time.Time{}
 	s.mu.Unlock()
 	s.poke()
 	return nil
@@ -197,6 +198,7 @@ func (s *Supervisor) reconcile(ctx context.Context) error {
 		if s.crashes > 0 && time.Since(ctr.State.StartedAt) > stableAfter {
 			s.crashes = 0
 		}
+		s.start = false
 		s.status.LastError = nil
 		s.mu.Unlock()
 		return nil
@@ -204,14 +206,16 @@ func (s *Supervisor) reconcile(ctx context.Context) error {
 	return s.restartExited(ctx, ctr.State.ExitCode)
 }
 
-// restartExited starts an exited node again: at once when it asked for it, otherwise with a
-// backoff that doubles per crash.
+// restartExited starts an exited node again: at once when it asked for it or the owner started
+// it, otherwise with a backoff that doubles per crash.
 func (s *Supervisor) restartExited(ctx context.Context, code int) error {
-	if code == exitRespawn {
-		slog.Info("node: asked to restart (exit 129)")
+	s.mu.Lock()
+	if s.start || code == exitRespawn {
+		s.start = false
+		s.mu.Unlock()
+		slog.Info("node: starting", "exitCode", code)
 		return s.pc.StartContainer(ctx, ContainerName)
 	}
-	s.mu.Lock()
 	if s.nextStart.IsZero() {
 		s.crashes++
 		delay := min(5*time.Second<<min(s.crashes-1, 6), maxBackoff)
