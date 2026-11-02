@@ -8,7 +8,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -61,7 +60,7 @@ func main() {
 		os.Exit(2)
 	}
 	if err != nil {
-		slog.Error(err.Error())
+		fmt.Fprintln(os.Stderr, "nosana-host:", err)
 		os.Exit(1)
 	}
 }
