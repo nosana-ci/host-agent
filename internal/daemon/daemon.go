@@ -68,7 +68,9 @@ func Run(ctx context.Context) error {
 		cfg: cfg, st: st, pc: pc, sup: sup,
 		upd:  updater.New(cfg, st, sup, pc),
 		ctrl: control.New(cfg.ControlURL, wallet),
-		gpu:  api.GpuStatus{Gpus: []api.Gpu{}}, // host-manager wants an array before the first detection too
+		// host-manager wants arrays before the first doctor run too
+		gpu:    api.GpuStatus{Gpus: []api.Gpu{}},
+		checks: []api.Check{},
 	}
 	slog.Info("nosana-host", "version", version.Version, "node", keys.Address(wallet), "control", cfg.ControlURL)
 
@@ -193,9 +195,6 @@ func (d *daemon) status(ctx context.Context) api.AgentStatus {
 	d.mu.Lock()
 	g, checks := d.gpu, d.checks
 	d.mu.Unlock()
-	if checks == nil {
-		checks = []api.Check{}
-	}
 	return api.AgentStatus{
 		Version: 1,
 		Agent:   api.AgentInfo{Version: version.Version, Commands: verbs(), Update: d.upd.Status()},
