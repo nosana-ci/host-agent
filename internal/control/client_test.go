@@ -14,8 +14,9 @@ import (
 	"github.com/nosana-ci/host-agent/internal/keys"
 )
 
-// A test host-manager that answers requests whose authorization header names this wallet.
-func server(t *testing.T, wallet ed25519.PrivateKey, handle http.HandlerFunc) *Client {
+// newClient talks to a test host-manager that answers requests whose authorization header names
+// this wallet.
+func newClient(t *testing.T, wallet ed25519.PrivateKey, handle http.HandlerFunc) *Client {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		parts := strings.Split(r.Header.Get("Authorization"), ":")
 		if len(parts) != 3 || parts[0] != keys.Address(wallet) {
@@ -30,7 +31,7 @@ func server(t *testing.T, wallet ed25519.PrivateKey, handle http.HandlerFunc) *C
 
 func TestHeartbeatReturnsCommands(t *testing.T) {
 	_, wallet, _ := ed25519.GenerateKey(rand.Reader)
-	c := server(t, wallet, func(w http.ResponseWriter, r *http.Request) {
+	c := newClient(t, wallet, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/agent/heartbeat" {
 			http.NotFound(w, r)
 			return
@@ -48,8 +49,9 @@ func TestHeartbeatReturnsCommands(t *testing.T) {
 
 func TestErrorsAreTyped(t *testing.T) {
 	_, wallet, _ := ed25519.GenerateKey(rand.Reader)
-	c := server(t, wallet, func(w http.ResponseWriter, r *http.Request) {
+	c := newClient(t, wallet, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+
 		case "/agent/claim":
 			http.Error(w, `{"message":"claim token expired"}`, http.StatusForbidden)
 		default:

@@ -84,8 +84,8 @@ func (s *Supervisor) Busy() bool {
 		return true
 	}
 
-	st := s.status
-	return st.Container == "running" && (st.State == nil || *st.State == "RUNNING_JOB" || *st.State == "BENCHMARKING")
+	status := s.status
+	return status.Container == "running" && (status.State == nil || *status.State == "RUNNING_JOB" || *status.State == "BENCHMARKING")
 }
 
 func (s *Supervisor) Start() error   { return s.want(false, false) }
@@ -93,7 +93,7 @@ func (s *Supervisor) Stop() error    { return s.want(true, false) }
 func (s *Supervisor) Restart() error { return s.want(false, true) }
 
 func (s *Supervisor) want(stopped, restart bool) error {
-	if err := s.st.Update(func(st *store.State) { st.NodeStopped = stopped }); err != nil {
+	if err := s.st.Update(func(state *store.State) { state.NodeStopped = stopped }); err != nil {
 		return err
 	}
 	s.mu.Lock()
@@ -113,7 +113,7 @@ func (s *Supervisor) SetImage(image string) {
 	s.image = image
 	s.mu.Unlock()
 	if changed {
-		_ = s.st.Update(func(st *store.State) { st.NodeImage = image })
+		_ = s.st.Update(func(state *store.State) { state.NodeImage = image })
 		s.poke()
 	}
 }
@@ -310,25 +310,26 @@ func (s *Supervisor) ensureNetwork(ctx context.Context) error {
 
 // observe refreshes the status from the container and the node's own API.
 func (s *Supervisor) observe(ctr *podman.Container, image string) {
-	st := api.NodeStatus{Container: "missing", Image: image}
+	status := api.NodeStatus{Container: "missing", Image: image}
 	if ctr == nil && image == "" {
-		st.Container = "unknown"
+		status.Container = "unknown"
 	}
 	if ctr != nil {
-		st.Container = ctr.State.Status
+		status.Container = ctr.State.Status
 		if img := ctr.Config.Labels[LabelImage]; img != "" {
-			st.Image = img
+			status.Image = img
 		}
 		if ctr.State.Running {
 			if state := nodeState(); state != "" {
-				st.State = &state
+				status.State = &state
 			}
 		}
 	}
 	s.mu.Lock()
-	st.Desired, st.Restarts, st.LastError = s.status.Desired, s.status.Restarts, s.status.LastError
-	s.status, s.observed = st, true
+	status.Desired, status.Restarts, status.LastError = s.status.Desired, s.status.Restarts, s.status.LastError
+	s.status, s.observed = status, true
 	s.mu.Unlock()
+
 }
 
 var infoClient = &http.Client{Timeout: 3 * time.Second}
