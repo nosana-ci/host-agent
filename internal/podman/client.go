@@ -4,6 +4,7 @@ package podman
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -169,6 +170,44 @@ func (c *Client) StartContainer(ctx context.Context, name string) error {
 func (c *Client) StopContainer(ctx context.Context, name string, timeout time.Duration) error {
 	q := url.Values{"timeout": {strconv.Itoa(int(timeout.Seconds()))}}
 	return c.call(ctx, http.MethodPost, "/containers/"+url.PathEscape(name)+"/stop", q, nil, nil)
+}
+
+// Logs writes the container's last tail lines (all when 0) to w, and keeps following when follow
+// is set, until ctx ends.
+func (c *Client) Logs(ctx context.Context, name string, tail int, follow bool, w io.Writer) error {
+	q := url.Values{"stdout": {"true"}, "stderr": {"true"}, "follow": {strconv.FormatBool(follow)}}
+	if tail > 0 {
+		q.Set("tail", strconv.Itoa(tail))
+	}
+	resp, err := c.do(ctx, http.MethodGet, "/containers/"+url.PathEscape(name)+"/logs", q, nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return ErrNotFound
+	}
+	if resp.StatusCode >= 300 {
+		return apiError(resp)
+	}
+	return demux(resp.Body, w)
+}
+
+// demux unwraps podman's log stream: 8-byte frame headers (stream type, three zero bytes, big
+// endian payload length) between the lines.
+func demux(r io.Reader, w io.Writer) error {
+	hdr := make([]byte, 8)
+	for {
+		if _, err := io.ReadFull(r, hdr); err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
+		}
+		if _, err := io.CopyN(w, r, int64(binary.BigEndian.Uint32(hdr[4:]))); err != nil {
+			return err
+		}
+	}
 }
 
 func (c *Client) RemoveContainer(ctx context.Context, name string) error {

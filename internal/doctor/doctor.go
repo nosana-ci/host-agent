@@ -55,6 +55,20 @@ var fixes = map[string]func(ctx context.Context) error{
 	"persistenced": func(context.Context) error { return service.Systemctl("enable", "--now", "nvidia-persistenced") },
 }
 
+// Summary is one line about the checks: all passed, or which need attention.
+func Summary(checks []api.Check) string {
+	var failing []string
+	for _, c := range checks {
+		if c.Status != api.Ok {
+			failing = append(failing, c.Title)
+		}
+	}
+	if len(failing) == 0 {
+		return fmt.Sprintf("%d checks passed", len(checks))
+	}
+	return fmt.Sprintf("%d of %d checks need attention: %s", len(failing), len(checks), strings.Join(failing, ", "))
+}
+
 func Fix(ctx context.Context, id string) error {
 	fix, ok := fixes[id]
 	if !ok {

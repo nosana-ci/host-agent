@@ -31,14 +31,15 @@ const (
 )
 
 type daemon struct {
-	cfg  config.Config
-	st   *store.Store
-	pc   *podman.Client
-	sup  *node.Supervisor
-	upd  *updater.Updater
-	ctrl *control.Client
-	bal  *walletBalance
-	cmds chan []api.AgentCommand
+	cfg     config.Config
+	address string // the node address
+	st      *store.Store
+	pc      *podman.Client
+	sup     *node.Supervisor
+	upd     *updater.Updater
+	ctrl    *control.Client
+	bal     *walletBalance
+	cmds    chan []api.AgentCommand
 
 	mu     sync.Mutex
 	gpu    api.GpuStatus
@@ -68,7 +69,7 @@ func Run(ctx context.Context) error {
 	bal := newWalletBalance(cfg.Network, keys.Address(wallet))
 	sup.WaitingForSOL = bal.waitingForSOL
 	d := &daemon{
-		cfg: cfg, st: st, pc: pc, sup: sup,
+		cfg: cfg, address: keys.Address(wallet), st: st, pc: pc, sup: sup,
 		upd:  updater.New(cfg, st, sup, pc),
 		ctrl: control.New(cfg.ControlURL, wallet),
 		bal:  bal,
@@ -77,10 +78,10 @@ func Run(ctx context.Context) error {
 		gpu:    api.GpuStatus{Gpus: []api.Gpu{}},
 		checks: []api.Check{},
 	}
-	slog.Info("nosana-host", "version", version.Version, "node", keys.Address(wallet), "control", cfg.ControlURL)
+	slog.Info("nosana-host", "version", version.Version, "node", d.address, "control", cfg.ControlURL)
 
 	var wg sync.WaitGroup
-	for _, run := range []func(context.Context){d.sup.Run, d.upd.Run, d.bal.run, d.doctorLoop, d.heartbeatLoop, d.pollLoop, d.commandLoop} {
+	for _, run := range []func(context.Context){d.sup.Run, d.upd.Run, d.bal.run, d.doctorLoop, d.heartbeatLoop, d.pollLoop, d.commandLoop, d.serveLocal} {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

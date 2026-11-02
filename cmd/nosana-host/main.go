@@ -1,5 +1,6 @@
 // nosana-host is the Nosana host agent: a root systemd service that runs the Nosana node in its
-// own podman and reports to host-manager, plus the install and status commands.
+// own podman and reports to host-manager, plus the commands around it. install and uninstall need
+// sudo; the others talk to the running agent and work for root and the nosana group.
 package main
 
 import (
@@ -8,18 +9,20 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
-	"time"
 
+	"github.com/nosana-ci/host-agent/internal/api"
 	"github.com/nosana-ci/host-agent/internal/config"
 	"github.com/nosana-ci/host-agent/internal/daemon"
+	"github.com/nosana-ci/host-agent/internal/doctor"
 	"github.com/nosana-ci/host-agent/internal/install"
-	"github.com/nosana-ci/host-agent/internal/keys"
-	"github.com/nosana-ci/host-agent/internal/node"
-	"github.com/nosana-ci/host-agent/internal/podman"
-	"github.com/nosana-ci/host-agent/internal/store"
+	"github.com/nosana-ci/host-agent/internal/local"
 	"github.com/nosana-ci/host-agent/internal/version"
 )
 
@@ -27,8 +30,10 @@ const usage = `nosana-host runs the Nosana node on this machine and reports to h
 
 Usage:
   nosana-host install --control-url URL --release-url URL --network mainnet|devnet [--token T]   install or repair (sudo)
-  nosana-host uninstall [--purge]       remove the services; --purge also deletes state after backing the wallet up
-  nosana-host status                    what the agent knows: node address, link, node container (sudo)
+  nosana-host uninstall [--purge]       remove the services; --purge also deletes state after backing the wallet up (sudo)
+  nosana-host status                    node address, link, node and update state
+  nosana-host logs [node|agent] [-f] [-n N]   the node container's log or the agent's journal
+  nosana-host doctor [--fix ID]         run the host checks; --fix applies the fix of one check
   nosana-host daemon                    run the agent (what the service runs)
   nosana-host version
 `
@@ -39,7 +44,7 @@ func main() {
 		os.Exit(2)
 	}
 	cmd := os.Args[1]
-	if (cmd == "install" || cmd == "uninstall" || cmd == "status") && os.Geteuid() != 0 {
+	if (cmd == "install" || cmd == "uninstall") && os.Geteuid() != 0 {
 		fmt.Fprintln(os.Stderr, "nosana-host: run with sudo")
 		os.Exit(1)
 	}
@@ -54,6 +59,10 @@ func main() {
 		err = install.Uninstall(context.Background(), *purge, os.Stdout)
 	case "status":
 		err = cmdStatus()
+	case "logs":
+		err = cmdLogs(os.Args[2:])
+	case "doctor":
+		err = cmdDoctor(os.Args[2:])
 	case "daemon":
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 		defer stop()
@@ -65,7 +74,7 @@ func main() {
 		os.Exit(2)
 	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "nosana-host:", err)
+		slog.Error(err.Error())
 		os.Exit(1)
 	}
 }
@@ -79,51 +88,99 @@ func cmdInstall(args []string) error {
 	token := fs.String("token", "", "claim token from the console's install command")
 	_ = fs.Parse(args)
 	return install.Run(context.Background(), cfg, *token, os.Stdout)
-
 }
 
 func cmdStatus() error {
-	cfg, err := config.Load()
-
-	if err != nil {
-		return errors.New("nosana-host is not installed")
-	}
-	if _, err := os.Stat(config.WalletPath); err != nil {
-		return errors.New("no node wallet yet; the install did not finish")
-	}
-	st, err := store.Open(config.StatePath)
-	if err != nil {
+	var s local.Status
+	if err := agent(http.MethodGet, "/status", &s); err != nil {
 		return err
 	}
-	wallet, err := keys.Wallet(config.WalletPath)
-	if err != nil {
-		return err
-	}
-	s := st.State()
-	fmt.Printf("agent       %s\nhost-manager %s (%s)\nnode address %s\n", version.Version, cfg.ControlURL, cfg.Network, keys.Address(wallet))
+	linked := "no; run the install command from the console"
 	switch {
 	case s.Claimed:
-		fmt.Println("linked      yes")
-	case s.ClaimToken != "":
-		fmt.Println("linked      not yet; the agent is claiming the host")
-	default:
-		fmt.Println("linked      no; run the install command from the console")
+		linked = "yes"
+	case s.ClaimPending:
+		linked = "not yet; the agent is claiming the host"
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	ctr, err := podman.New(config.PodmanSocket).InspectContainer(ctx, node.ContainerName)
-	switch {
-	case errors.Is(err, podman.ErrNotFound):
-		fmt.Println("node        no container yet")
-	case err != nil:
-		fmt.Printf("node        podman not reachable (%v)\n", err)
-	default:
-		fmt.Printf("node        %s (%s)\n", ctr.State.Status, ctr.Config.Labels[node.LabelImage])
+	n := s.Status.Node
+	nodeLine := n.Container + " (" + n.Image + ")"
+	if n.State != nil {
+		nodeLine += " " + *n.State
 	}
-	if s.Update.LastRollback != "" || s.Update.Pending != nil {
-		raw, _ := json.Marshal(s.Update)
-		fmt.Printf("update      %s\n", raw)
+	fmt.Printf("agent        %s\nhost-manager %s (%s)\nnode address %s\nlinked       %s\nnode         %s\nchecks       %s\nupdate       %s\n",
+		s.Agent, s.ControlURL, s.Network, s.NodeAddress, linked, nodeLine, doctor.Summary(s.Status.Checks), s.Status.Agent.Update.State)
+	if s.Update.LastRollback != "" {
+		fmt.Printf("rollback     %s\n", s.Update.LastRollback)
 	}
 	return nil
+}
+
+func cmdLogs(args []string) error {
+	fs := flag.NewFlagSet("logs", flag.ExitOnError)
+	follow := fs.Bool("f", false, "keep following")
+	tail := fs.Int("n", 100, "lines to show first")
+	what := "node"
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		what, args = args[0], args[1:]
+	}
+	_ = fs.Parse(args)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://agent/logs/%s?tail=%d&follow=%t", what, *tail, *follow), nil)
+	resp, err := local.Client().Do(req)
+	if err != nil {
+		return local.Explain(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		msg, _ := io.ReadAll(resp.Body)
+		return errors.New(strings.TrimSpace(string(msg)))
+	}
+	_, err = io.Copy(os.Stdout, resp.Body)
+	if ctx.Err() != nil {
+		return nil
+	}
+	return err
+}
+
+func cmdDoctor(args []string) error {
+	fs := flag.NewFlagSet("doctor", flag.ExitOnError)
+	fix := fs.String("fix", "", "apply the fix of this check")
+	_ = fs.Parse(args)
+	var checks []api.Check
+	if err := agent(http.MethodPost, "/doctor?fix="+*fix, &checks); err != nil {
+		return err
+	}
+	for _, c := range checks {
+		line := fmt.Sprintf("%-4s %s", strings.ToUpper(string(c.Status)), c.Title)
+		if c.Detail != nil && *c.Detail != "" {
+			line += ": " + *c.Detail
+		}
+		fmt.Println(line)
+		if c.Status != api.Ok && c.Fix != nil {
+			fmt.Printf("     → %s", *c.Fix)
+			if c.Fixable != nil && *c.Fixable {
+				fmt.Printf("  (nosana-host doctor --fix %s)", c.Id)
+			}
+			fmt.Println()
+		}
+	}
+	fmt.Println(doctor.Summary(checks))
+	return nil
+}
+
+// agent calls the running agent over its socket and decodes the JSON answer into out.
+func agent(method, path string, out any) error {
+	req, _ := http.NewRequest(method, "http://agent"+path, nil)
+	resp, err := local.Client().Do(req)
+	if err != nil {
+		return local.Explain(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		msg, _ := io.ReadAll(resp.Body)
+		return errors.New(strings.TrimSpace(string(msg)))
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
 }

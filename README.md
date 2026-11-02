@@ -19,7 +19,7 @@ reads the current release manifest, downloads the agent and checks its sha256, a
 1. puts the binary in `/var/lib/nosana/agent/bin/` and links `/usr/local/bin/nosana-host` to it;
 2. downloads the podman runtime bundle the release names into `/var/lib/nosana/runtime/<version>`
    (hosts never install podman; `nftables` is installed when the host has no firewall tool);
-3. creates the node wallet (`/var/lib/nosana/node/nosana_key.json`);
+3. creates the node wallet (`/var/lib/nosana/node/nosana_key.json`) and the `nosana` group for the CLI;
 4. writes `/etc/nosana/host.json` (host-manager URL, network) and the two systemd units,
    `nosana-podman.service` and `nosana-host.service`, and starts them.
 
@@ -29,10 +29,15 @@ newer), nvidia-container-toolkit and a CDI spec for the GPU; the console's healt
 what is missing.
 
 ```sh
-sudo nosana-host status            # node address, link, node container
-journalctl -u nosana-host -f       # the agent's log
+nosana-host status                 # node address, link, node and update state
+nosana-host logs [node|agent] -f   # the node container's log, or the agent's journal
+nosana-host doctor [--fix ID]      # the host checks; --fix applies the fix of one check
 sudo nosana-host uninstall [--purge]   # --purge deletes state too, after backing up the wallet into your home
 ```
+
+`status`, `logs` and `doctor` talk to the running agent over `/run/nosana/cli.sock`, which belongs
+to root and the `nosana` group; the installer adds the user who ran it to that group (log in again
+once), so only install and uninstall need sudo.
 
 Install script: `host-console/static/install.sh`.
 
@@ -76,7 +81,7 @@ The wire types in `internal/api/types.gen.go` are generated from host-manager's 
 `make api-types HOST_MANAGER=http://localhost:3005` (needs `jq`; the generator is a Go tool
 dependency).
 
-Layout: `cmd/nosana-host` (CLI), `cmd/nosana-host-publish` (release tool), `internal/manifest` (the release manifest), `internal/daemon`
+Layout: `cmd/nosana-host` (CLI), `cmd/nosana-host-publish` (release tool), `internal/manifest` (the release manifest), `internal/local` (the CLI socket), `internal/daemon`
 (wiring and the command table), `node` (supervisor), `control` (host-manager client and request
 signing), `updater` (self-update, rollback, runtime switch), `bundle` (the podman bundle),
 `doctor` (checks, fixes, GPU detection), `install`, `service` (systemd units), `store` (atomic files,

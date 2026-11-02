@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 
 	"github.com/nosana-ci/host-agent/internal/api"
 	"github.com/nosana-ci/host-agent/internal/doctor"
@@ -26,14 +25,14 @@ var commands = []struct {
 		return "node starting", d.sup.Start()
 	}},
 	{"run-doctor", func(d *daemon, ctx context.Context, _ map[string]any) (string, error) {
-		return summary(d.runDoctor(ctx)), nil
+		return doctor.Summary(d.runDoctor(ctx)), nil
 	}},
 	{"fix-check", func(d *daemon, ctx context.Context, args map[string]any) (string, error) {
 		id, _ := args["id"].(string)
 		if err := doctor.Fix(ctx, id); err != nil {
 			return "", err
 		}
-		return "fixed " + id + "; " + summary(d.runDoctor(ctx)), nil
+		return "fixed " + id + "; " + doctor.Summary(d.runDoctor(ctx)), nil
 	}},
 	{"update", func(d *daemon, ctx context.Context, _ map[string]any) (string, error) {
 
@@ -70,17 +69,4 @@ func (d *daemon) run(ctx context.Context, c api.AgentCommand) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("unknown command %q", c.Verb)
-}
-
-func summary(checks []api.Check) string {
-	var failing []string
-	for _, c := range checks {
-		if c.Status != api.Ok {
-			failing = append(failing, c.Title)
-		}
-	}
-	if len(failing) == 0 {
-		return fmt.Sprintf("%d checks passed", len(checks))
-	}
-	return fmt.Sprintf("%d of %d checks need attention: %s", len(failing), len(checks), strings.Join(failing, ", "))
 }
