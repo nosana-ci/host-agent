@@ -35,9 +35,6 @@ type Options struct {
 }
 
 func Run(ctx context.Context, o Options, out io.Writer) (err error) {
-	if os.Geteuid() != 0 {
-		return errors.New("run with sudo")
-	}
 	say := sayTo(out)
 
 	cfg, err := config.Load()
@@ -156,10 +153,8 @@ func Run(ctx context.Context, o Options, out io.Writer) (err error) {
 // Uninstall stops and removes the services; purge also deletes the state after backing the
 // wallet up into the home of the user who ran sudo.
 func Uninstall(ctx context.Context, purge bool, out io.Writer) error {
-	if os.Geteuid() != 0 {
-		return errors.New("run with sudo")
-	}
 	say := sayTo(out)
+
 	_ = service.Systemctl("stop", service.AgentUnit)
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()

@@ -38,8 +38,13 @@ func main() {
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
 	}
+	cmd := os.Args[1]
+	if (cmd == "install" || cmd == "uninstall" || cmd == "status") && os.Geteuid() != 0 {
+		fmt.Fprintln(os.Stderr, "nosana-host: run with sudo")
+		os.Exit(1)
+	}
 	var err error
-	switch os.Args[1] {
+	switch cmd {
 	case "install":
 		err = cmdInstall(os.Args[2:])
 	case "uninstall":
@@ -77,10 +82,8 @@ func cmdInstall(args []string) error {
 }
 
 func cmdStatus() error {
-	if os.Geteuid() != 0 {
-		return errors.New("run with sudo")
-	}
 	cfg, err := config.Load()
+
 	if err != nil {
 		return errors.New("nosana-host is not installed")
 	}
