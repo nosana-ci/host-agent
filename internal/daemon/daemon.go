@@ -102,16 +102,18 @@ func (d *daemon) runDoctor(ctx context.Context) []api.Check {
 	return checks
 }
 
-// heartbeatLoop claims the host when it is not linked, and otherwise reports the status every
-// heartbeatEvery. Failures back off up to five minutes.
+// heartbeatLoop claims the host while a claim token is saved, and otherwise reports the status
+// every heartbeatEvery while the host is linked. Failures back off up to five minutes.
 func (d *daemon) heartbeatLoop(ctx context.Context) {
 	fails := 0
 	for ctx.Err() == nil {
 		var err error
-		if d.st.State().Claimed {
+		if raw, readErr := os.ReadFile(config.ClaimTokenPath); readErr == nil {
+			err = d.claim(ctx, strings.TrimSpace(string(raw)))
+		} else if d.st.State().Claimed {
 			err = d.heartbeat(ctx)
 		} else {
-			err = d.claim(ctx)
+			err = errors.New("not linked to an account: run the install command from the console again")
 		}
 		wait := heartbeatEvery
 		if err != nil {
@@ -128,14 +130,12 @@ func (d *daemon) heartbeatLoop(ctx context.Context) {
 }
 
 // claim links the host with the token the installer saved. A token host-manager refuses is
-// dropped: the owner makes a new one and runs the install command again.
-func (d *daemon) claim(ctx context.Context) error {
-	raw, err := os.ReadFile(config.ClaimTokenPath)
-	if err != nil {
-		return errors.New("not linked to an account: run the install command from the console again")
-	}
+// dropped: the owner makes a new one and runs the install command again. A host that is linked
+// already stays linked either way.
+func (d *daemon) claim(ctx context.Context, token string) error {
 	hostname, _ := os.Hostname()
-	err = d.ctrl.Claim(ctx, strings.TrimSpace(string(raw)), hostname)
+	err := d.ctrl.Claim(ctx, token, hostname)
+
 	var he *control.HTTPError
 	if errors.As(err, &he) && he.Status != 429 && he.Status < 500 {
 		_ = os.Remove(config.ClaimTokenPath)

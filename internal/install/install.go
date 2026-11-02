@@ -129,8 +129,8 @@ func Run(ctx context.Context, o Options, out io.Writer) (err error) {
 		if err := store.WriteFile(config.ClaimTokenPath, []byte(o.Token), 0o600); err != nil {
 			return err
 		}
-		_ = st.Update(func(s *store.State) { s.Claimed = false })
 		say("claim token saved; the agent links this host to your account on start")
+
 	}
 	if err := cfg.Save(); err != nil {
 		return err
