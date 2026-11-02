@@ -15,12 +15,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nosana-ci/host-agent/internal/bundle"
 	"github.com/nosana-ci/host-agent/internal/config"
 	"github.com/nosana-ci/host-agent/internal/keys"
 	"github.com/nosana-ci/host-agent/internal/manifest"
 	"github.com/nosana-ci/host-agent/internal/node"
 	"github.com/nosana-ci/host-agent/internal/podman"
-	"github.com/nosana-ci/host-agent/internal/runtime"
 	"github.com/nosana-ci/host-agent/internal/service"
 	"github.com/nosana-ci/host-agent/internal/store"
 	"github.com/nosana-ci/host-agent/internal/version"
@@ -94,20 +94,20 @@ func Run(ctx context.Context, o Options, out io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("read the release from %s: %w", cfg.ReleaseURL, err)
 	}
-	if err := runtime.EnsureFirewallTool(ctx); err != nil {
+	if err := bundle.EnsureFirewallTool(ctx); err != nil {
 		say("warning: %v", err)
 	}
-	if runtime.Current() == "" {
-		ver, err := runtime.Install(ctx, m)
+	if bundle.Current() == "" {
+		ver, err := bundle.Install(ctx, m)
 		if err != nil {
 			return fmt.Errorf("install the container runtime: %w", err)
 		}
-		if err := runtime.Activate(ver); err != nil {
+		if err := bundle.Activate(ver); err != nil {
 			return err
 		}
 		say("container runtime %s installed", ver)
 	}
-	if err := runtime.EnsurePolicy(); err != nil {
+	if err := bundle.EnsurePolicy(); err != nil {
 		return err
 	}
 	_ = st.Update(func(s *store.State) { s.NodeImage = m.Node.Image })

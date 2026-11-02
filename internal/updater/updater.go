@@ -13,11 +13,11 @@ import (
 	"time"
 
 	"github.com/nosana-ci/host-agent/internal/api"
+	"github.com/nosana-ci/host-agent/internal/bundle"
 	"github.com/nosana-ci/host-agent/internal/config"
 	"github.com/nosana-ci/host-agent/internal/manifest"
 	"github.com/nosana-ci/host-agent/internal/node"
 	"github.com/nosana-ci/host-agent/internal/podman"
-	"github.com/nosana-ci/host-agent/internal/runtime"
 	"github.com/nosana-ci/host-agent/internal/service"
 	"github.com/nosana-ci/host-agent/internal/store"
 	"github.com/nosana-ci/host-agent/internal/updater/download"
@@ -122,7 +122,7 @@ func (u *Updater) Check(ctx context.Context, force bool) (string, error) {
 
 	busy := u.sup.Busy() && !force
 	// The runtime only moves up: a halted release must not downgrade podman under its database.
-	if cur := runtime.Current(); version.Compare(m.Runtime.Version, cur) > 0 && !slices.Contains(u.st.State().Update.BlockedRuntime, m.Runtime.Version) {
+	if cur := bundle.Current(); version.Compare(m.Runtime.Version, cur) > 0 && !slices.Contains(u.st.State().Update.BlockedRuntime, m.Runtime.Version) {
 		if busy {
 			u.set("deferred", "runtime "+m.Runtime.Version+" waits until the node is idle")
 			return "runtime update to " + m.Runtime.Version + " deferred: the node is busy", nil
@@ -175,7 +175,7 @@ func (u *Updater) Poke() {
 func (u *Updater) installAgent(ctx context.Context, m *manifest.Manifest) error {
 	art := m.Agent.Artifacts.LinuxAmd64
 	if art.Url == "" {
-		return fmt.Errorf("release %s has no %s build", m.Version, runtime.Platform)
+		return fmt.Errorf("release %s has no %s build", m.Version, bundle.Platform)
 	}
 	previous, err := filepath.EvalSymlinks(config.CurrentBinary)
 	if err != nil {
@@ -219,13 +219,13 @@ func (u *Updater) commit() {
 // goes back to the old bundle when podman does not come up.
 func (u *Updater) switchRuntime(ctx context.Context, m *manifest.Manifest, old string) error {
 	u.set("downloading", "runtime "+m.Runtime.Version)
-	ver, err := runtime.Install(ctx, m)
+	ver, err := bundle.Install(ctx, m)
 	if err != nil {
 		return err
 	}
 	if err := u.activate(ctx, ver); err == nil {
 		slog.Info("runtime switched", "from", old, "to", ver)
-		runtime.Prune(old)
+		bundle.Prune(old)
 		return nil
 	}
 	slog.Warn("runtime did not come up; going back", "failed", ver, "to", old)
@@ -240,7 +240,7 @@ func (u *Updater) switchRuntime(ctx context.Context, m *manifest.Manifest, old s
 }
 
 func (u *Updater) activate(ctx context.Context, ver string) error {
-	if err := runtime.Activate(ver); err != nil {
+	if err := bundle.Activate(ver); err != nil {
 		return err
 	}
 	if err := service.Systemctl("restart", service.PodmanUnit); err != nil {

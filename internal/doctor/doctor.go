@@ -16,9 +16,9 @@ import (
 	"time"
 
 	"github.com/nosana-ci/host-agent/internal/api"
+	"github.com/nosana-ci/host-agent/internal/bundle"
 	"github.com/nosana-ci/host-agent/internal/config"
 	"github.com/nosana-ci/host-agent/internal/podman"
-	bundle "github.com/nosana-ci/host-agent/internal/runtime"
 	"github.com/nosana-ci/host-agent/internal/service"
 )
 
@@ -52,7 +52,7 @@ func Run(ctx context.Context, controlURL string, pc *podman.Client, g api.GpuSta
 var fixes = map[string]func(ctx context.Context) error{
 	"podman":       func(context.Context) error { return service.Systemctl("restart", service.PodmanUnit) },
 	"firewall":     bundle.EnsureFirewallTool,
-	"persistenced": func(context.Context) error { return run("systemctl", "enable", "--now", "nvidia-persistenced") },
+	"persistenced": func(context.Context) error { return service.Systemctl("enable", "--now", "nvidia-persistenced") },
 }
 
 // Fix applies the fix of one check.
@@ -62,13 +62,6 @@ func Fix(ctx context.Context, id string) error {
 		return fmt.Errorf("no automatic fix for check %q", id)
 	}
 	return fix(ctx)
-}
-
-func run(name string, args ...string) error {
-	if out, err := exec.Command(name, args...).CombinedOutput(); err != nil {
-		return fmt.Errorf("%s %s: %v: %s", name, strings.Join(args, " "), err, strings.TrimSpace(string(out)))
-	}
-	return nil
 }
 
 func check(id, title string, status api.CheckStatus, detail string) api.Check {
@@ -135,41 +128,13 @@ func checkDisk() api.Check {
 
 // Disk is the filesystem holding the state directory (podman's storage lives there).
 func Disk() api.DiskStatus {
-	path := config.StateDir
-	for {
-		if _, err := os.Stat(path); err == nil || path == "/" {
-			break
-		}
-		path = path[:strings.LastIndex(path, "/")]
-		if path == "" {
-			path = "/"
-		}
-	}
+	d := api.DiskStatus{Mount: config.StateDir}
 	var s syscall.Statfs_t
-	if err := syscall.Statfs(path, &s); err != nil {
-		return api.DiskStatus{Mount: path}
+	if err := syscall.Statfs(config.StateDir, &s); err == nil {
+		d.FreeGb = float32(s.Bavail) * float32(s.Bsize) / 1e9
+		d.TotalGb = float32(s.Blocks) * float32(s.Bsize) / 1e9
 	}
-	return api.DiskStatus{
-		FreeGb:  float32(s.Bavail) * float32(s.Bsize) / 1e9,
-		TotalGb: float32(s.Blocks) * float32(s.Bsize) / 1e9,
-		Mount:   mountPoint(path),
-	}
-}
-
-func mountPoint(path string) string {
-	var st syscall.Stat_t
-	if syscall.Stat(path, &st) != nil {
-		return path
-	}
-	for path != "/" {
-		parent := path[:max(strings.LastIndex(path, "/"), 1)]
-		var up syscall.Stat_t
-		if syscall.Stat(parent, &up) != nil || up.Dev != st.Dev {
-			break
-		}
-		path = parent
-	}
-	return path
+	return d
 }
 
 func checkPodman(ctx context.Context, pc *podman.Client) api.Check {

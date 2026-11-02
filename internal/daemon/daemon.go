@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/nosana-ci/host-agent/internal/api"
+	"github.com/nosana-ci/host-agent/internal/bundle"
 	"github.com/nosana-ci/host-agent/internal/config"
 	"github.com/nosana-ci/host-agent/internal/control"
 	"github.com/nosana-ci/host-agent/internal/doctor"
@@ -20,7 +21,6 @@ import (
 	"github.com/nosana-ci/host-agent/internal/keys"
 	"github.com/nosana-ci/host-agent/internal/node"
 	"github.com/nosana-ci/host-agent/internal/podman"
-	"github.com/nosana-ci/host-agent/internal/runtime"
 	"github.com/nosana-ci/host-agent/internal/service"
 	"github.com/nosana-ci/host-agent/internal/store"
 	"github.com/nosana-ci/host-agent/internal/updater"
@@ -150,7 +150,9 @@ func (d *daemon) claim(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("claim: %w", err)
 	}
-	_ = d.st.Update(func(s *store.State) { s.Claimed = true })
+	if err := d.st.Update(func(s *store.State) { s.Claimed = true }); err != nil {
+		return err
+	}
 	_ = os.Remove(config.ClaimTokenPath)
 	slog.Info("linked to the account")
 	return nil
@@ -217,7 +219,7 @@ func (d *daemon) runtimeStatus(ctx context.Context) api.RuntimeStatus {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	st := api.RuntimeStatus{}
-	if b := runtime.Current(); b != "" {
+	if b := bundle.Current(); b != "" {
 		st.Bundle = &b
 	}
 	if info, err := d.pc.Info(ctx); err == nil {

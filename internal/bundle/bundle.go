@@ -1,9 +1,9 @@
-// Package runtime installs the container runtime bundle: a relocatable podman with its helpers,
+// Package bundle installs the container runtime bundle: a relocatable podman with its helpers,
 // so hosts never install podman themselves.
 //
 //	/var/lib/nosana/runtime/<version>/bin, lib/podman, etc, env   one unpacked bundle per version
 //	/var/lib/nosana/runtime/current -> <version>                  the nosana-podman unit runs current/bin/podman
-package runtime
+package bundle
 
 import (
 	"archive/tar"
