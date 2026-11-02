@@ -80,12 +80,15 @@ state), `keys`, `config`.
 
 ## Releases
 
-A tag `vX.Y.Z` runs the `release` CI job: `make build`, `make runtime` (the podman bundle from the
-GPG-verified podman-static release), upload of both to the project's generic package registry, and
-`nosana-host-publish`, which writes the manifest, signs it with `RELEASE_SIGNING_KEY` and uploads
-`stable.json` and `stable.json.sig` under the package version `stable`. That URL is the release URL
-agents and `install.sh` read. To halt a release, re-run the job on the previous tag: it republishes
-that manifest, and agents never install a version lower than their own.
+The agent is open source on GitHub (`github.com/nosana-ci/nosana-host`, a mirror of the GitLab
+project), and releases are GitHub Releases there. A tag `vX.Y.Z` runs the `release` CI job:
+`make build`, `make runtime` (the podman bundle from the GPG-verified podman-static release),
+`nosana-host-publish` (writes the manifest and signs it with `RELEASE_SIGNING_KEY`), then
+`scripts/github-release.sh` publishes the binary, the runtime bundle, `stable.json` and
+`stable.json.sig` as the release's assets. Agents and `install.sh` read
+`https://github.com/nosana-ci/nosana-host/releases/latest/download/stable.json`, so the newest full
+release is the stable one. To halt a release, mark it as a pre-release on GitHub: "latest" moves
+back to the previous one, and agents never install a version lower than their own.
 
 `go run ./cmd/nosana-host-publish keygen` makes a key pair: the seed goes into CI
 (`RELEASE_SIGNING_KEY`), the public key into the build (`RELEASE_PUBLIC_KEY`).
