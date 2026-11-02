@@ -101,11 +101,15 @@ func cmdStatus() error {
 	}
 	s := st.State()
 	fmt.Printf("agent       %s\nhost-manager %s (%s)\nnode address %s\n", version.Version, cfg.ControlURL, cfg.Network, keys.Address(wallet))
-	if s.Claimed {
+	switch {
+	case s.Claimed:
 		fmt.Println("linked      yes")
-	} else {
+	case s.ClaimToken != "":
+		fmt.Println("linked      not yet; the agent is claiming the host")
+	default:
 		fmt.Println("linked      no; run the install command from the console")
 	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	ctr, err := podman.New(config.PodmanSocket).InspectContainer(ctx, node.ContainerName)
