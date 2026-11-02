@@ -124,12 +124,12 @@ func Run(ctx context.Context, o Options, out io.Writer) (err error) {
 	}
 	say("node address %s", keys.Address(wallet))
 	if o.Token != "" {
-		if err := store.WriteFile(config.ClaimTokenPath, []byte(o.Token), 0o600); err != nil {
+		if err := st.Update(func(s *store.State) { s.ClaimToken = o.Token }); err != nil {
 			return err
 		}
 		say("claim token saved; the agent links this host to your account on start")
-
 	}
+
 	if err := cfg.Save(); err != nil {
 		return err
 	}

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -109,11 +108,12 @@ func (d *daemon) heartbeatLoop(ctx context.Context) {
 	fails := 0
 	for ctx.Err() == nil {
 		var err error
-		if raw, readErr := os.ReadFile(config.ClaimTokenPath); readErr == nil {
-			err = d.claim(ctx, strings.TrimSpace(string(raw)))
-		} else if d.st.State().Claimed {
+		switch state := d.st.State(); {
+		case state.ClaimToken != "":
+			err = d.claim(ctx, state.ClaimToken)
+		case state.Claimed:
 			err = d.heartbeat(ctx)
-		} else {
+		default:
 			err = errors.New("not linked to an account: run the install command from the console again")
 		}
 		wait := heartbeatEvery
@@ -136,21 +136,20 @@ func (d *daemon) heartbeatLoop(ctx context.Context) {
 func (d *daemon) claim(ctx context.Context, token string) error {
 	hostname, _ := os.Hostname()
 	err := d.ctrl.Claim(ctx, token, hostname)
-
 	var he *control.HTTPError
 	if errors.As(err, &he) && he.Status != 429 && he.Status < 500 {
-		_ = os.Remove(config.ClaimTokenPath)
+		_ = d.st.Update(func(s *store.State) { s.ClaimToken = "" })
 		return fmt.Errorf("claim refused (%s); make a new install command in the console", he.Message)
 	}
 	if err != nil {
 		return fmt.Errorf("claim: %w", err)
 	}
-	if err := d.st.Update(func(s *store.State) { s.Claimed = true }); err != nil {
+	if err := d.st.Update(func(s *store.State) { s.Claimed, s.ClaimToken = true, "" }); err != nil {
 		return err
 	}
-	_ = os.Remove(config.ClaimTokenPath)
 	slog.Info("linked to the account")
 	return nil
+
 }
 
 func (d *daemon) heartbeat(ctx context.Context) error {
