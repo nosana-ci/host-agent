@@ -163,15 +163,8 @@ func (d *daemon) heartbeat(ctx context.Context) error {
 		_ = d.st.Update(func(s *store.State) { s.Claimed = false })
 		return errors.New("host-manager does not know this host anymore; waiting for a new claim")
 	case err != nil:
-		var he *control.HTTPError
-		if errors.As(err, &he) {
-			d.upd.Unhealthy()
-		}
 		return fmt.Errorf("heartbeat: %w", err)
 	}
-	now := time.Now().UTC()
-	_ = d.st.Update(func(s *store.State) { s.LastHeartbeatAt = &now })
-	d.upd.Committed()
 	d.runCommands(ctx, cmds)
 	return nil
 }

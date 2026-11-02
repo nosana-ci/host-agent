@@ -26,9 +26,9 @@ import (
 
 const (
 	checkEvery = 10 * time.Minute
-	// healthDeadline is how long a new version has to get a heartbeat accepted before it is
-	// rolled back.
-	healthDeadline = 5 * time.Minute
+	// keepAfter is how long a new version must stay up before it is kept; Preflight rolls back
+	// a version that fails to start three times before that.
+	keepAfter      = 2 * time.Minute
 	runtimeStartup = 45 * time.Second
 )
 
@@ -46,7 +46,7 @@ type Updater struct {
 func New(cfg config.Config, st *store.Store, sup *node.Supervisor, pc *podman.Client) *Updater {
 	u := &Updater{cfg: cfg, st: st, sup: sup, pc: pc, wake: make(chan struct{}, 1), status: api.UpdateStatus{State: "idle"}}
 	if p := st.State().Update.Pending; p != nil && p.Version == version.Version {
-		u.set("pending", "version "+p.Version+" must send a heartbeat before it is kept")
+		u.set("pending", "version "+p.Version+" is kept after "+keepAfter.String()+" up")
 	}
 	return u
 }
@@ -66,8 +66,13 @@ func (u *Updater) set(state, detail string) {
 	}
 }
 
-// Run checks the release every checkEvery and applies what it finds.
+// Run checks the release every checkEvery and applies what it finds. A pending version is kept
+// once this process has been up for keepAfter.
 func (u *Updater) Run(ctx context.Context) {
+	var keep <-chan time.Time
+	if p := u.st.State().Update.Pending; p != nil && p.Version == version.Version {
+		keep = time.After(keepAfter)
+	}
 	for {
 		if _, err := u.Check(ctx, false); err != nil && ctx.Err() == nil {
 			slog.Warn("update check", "err", err)
@@ -75,6 +80,9 @@ func (u *Updater) Run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-keep:
+			keep = nil
+			u.commit()
 		case <-time.After(checkEvery):
 		case <-u.wake:
 		}
@@ -157,7 +165,7 @@ func (u *Updater) installAgent(ctx context.Context, m *manifest.Manifest) error 
 		return fmt.Errorf("agent %s does not run here (%v: %s); not switching to it", m.Version, err, strings.TrimSpace(string(out)))
 	}
 	if err := u.st.Update(func(s *store.State) {
-		s.Update.Pending = &store.Pending{Version: m.Version, Previous: previous, StartedAt: time.Now().UTC()}
+		s.Update.Pending = &store.Pending{Version: m.Version, Previous: previous}
 	}); err != nil {
 		return err
 	}
@@ -170,25 +178,13 @@ func (u *Updater) installAgent(ctx context.Context, m *manifest.Manifest) error 
 	return nil
 }
 
-// Committed is called when host-manager accepted a heartbeat: a pending version has come up.
-func (u *Updater) Committed() {
+// commit keeps the running version: it stayed up long enough.
+func (u *Updater) commit() {
 	p := u.st.State().Update.Pending
-	if p == nil || p.Version != version.Version {
-		return
-	}
 	_ = u.st.Update(func(s *store.State) { s.Update.Pending = nil })
 	pruneBinaries(p.Previous)
 	slog.Info("agent update committed", "version", version.Version, "was", binVersion(p.Previous))
 	u.set("idle", "")
-}
-
-// Unhealthy is called when a heartbeat was refused while host-manager answered: a pending version
-// that gets nothing accepted within the deadline is rolled back.
-func (u *Updater) Unhealthy() {
-	p := u.st.State().Update.Pending
-	if p != nil && p.Version == version.Version && time.Since(p.StartedAt) > healthDeadline {
-		rollback(u.st, fmt.Sprintf("version %s sent no accepted heartbeat within %s", p.Version, healthDeadline))
-	}
 }
 
 // switchRuntime installs the manifest's runtime bundle, restarts the podman service on it and

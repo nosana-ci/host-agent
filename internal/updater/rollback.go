@@ -13,8 +13,7 @@ import (
 	"github.com/nosana-ci/nosana-host/internal/version"
 )
 
-// maxStarts is how often a pending version may start without ever sending a heartbeat before it
-// is rolled back.
+// maxStarts is how often a pending version may start without staying up before it is rolled back.
 const maxStarts = 3
 
 // Preflight runs first thing in a new process: it counts the start of a pending version and

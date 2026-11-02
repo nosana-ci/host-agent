@@ -54,9 +54,9 @@ Install script: `host-console/public/install.sh`.
   the release key built into it, and when the node is idle: switches the runtime bundle (and goes
   back when podman does not come up within 45 s), swaps the node image, and installs a newer agent:
   download, sha256, a `version` run, then `bin/current` is relinked and the process execs the new
-  binary in place; the node keeps running. The new version is kept once host-manager accepts a
-  heartbeat. Three failed starts, or five minutes without an accepted heartbeat while host-manager
-  answers, roll back to the previous binary and block that version on this host.
+  binary in place; the node keeps running. The new version is kept once it has been up for two
+  minutes; three failed starts before that roll back to the previous binary and block that version
+  on this host.
 - **Offline.** When host-manager is away the node keeps running and heartbeats retry with a backoff
   up to five minutes. A host that was unlinked in the console answers `unknown host`; the agent then
   waits for a new install command.

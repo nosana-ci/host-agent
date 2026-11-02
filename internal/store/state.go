@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"sync"
-	"time"
 )
 
 // State is what the agent remembers between runs, in agent/state.json.
@@ -13,9 +12,7 @@ type State struct {
 	Claimed     bool   `json:"claimed"`
 	NodeStopped bool   `json:"nodeStopped"`
 	NodeImage   string `json:"nodeImage,omitempty"` // from the release manifest
-	// LastHeartbeatAt is when host-manager last accepted a heartbeat.
-	LastHeartbeatAt *time.Time `json:"lastHeartbeatAt,omitempty"`
-	Update          Update     `json:"update"`
+	Update      Update `json:"update"`
 }
 
 // Update is the self-update bookkeeping: the version that must still prove itself, the ones
@@ -27,12 +24,11 @@ type Update struct {
 	LastRollback   string   `json:"lastRollback,omitempty"`
 }
 
-// Pending is an agent version that was switched to but has not sent a heartbeat yet.
+// Pending is an agent version that was switched to but has not stayed up long enough yet.
 type Pending struct {
-	Version   string    `json:"version"`
-	Previous  string    `json:"previous"` // the binary to go back to
-	Attempts  int       `json:"attempts"` // starts counted by Preflight
-	StartedAt time.Time `json:"startedAt"`
+	Version  string `json:"version"`
+	Previous string `json:"previous"` // the binary to go back to
+	Attempts int    `json:"attempts"` // starts counted by Preflight
 }
 
 func (u Update) IsBlocked(version string) bool {

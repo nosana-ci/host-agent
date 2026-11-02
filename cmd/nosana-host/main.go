@@ -92,12 +92,9 @@ func cmdStatus() error {
 	}
 	s := st.State()
 	fmt.Printf("agent       %s\nhost-manager %s (%s)\nnode address %s\n", version.Version, cfg.ControlURL, cfg.Network, keys.Address(wallet))
-	switch {
-	case s.Claimed && s.LastHeartbeatAt != nil:
-		fmt.Printf("linked      yes, last heartbeat %s ago\n", time.Since(*s.LastHeartbeatAt).Round(time.Second))
-	case s.Claimed:
-		fmt.Println("linked      yes, no heartbeat yet")
-	default:
+	if s.Claimed {
+		fmt.Println("linked      yes")
+	} else {
 		fmt.Println("linked      no; run the install command from the console")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
