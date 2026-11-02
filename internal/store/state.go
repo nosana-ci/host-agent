@@ -32,15 +32,6 @@ type Pending struct {
 	Attempts int    `json:"attempts"` // starts counted by Preflight
 }
 
-func (u Update) IsBlocked(version string) bool {
-	for _, b := range u.Blocked {
-		if b == version {
-			return true
-		}
-	}
-	return false
-}
-
 // Store is the state file with a lock around it.
 type Store struct {
 	path  string

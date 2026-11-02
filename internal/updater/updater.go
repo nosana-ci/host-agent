@@ -134,7 +134,7 @@ func (u *Updater) Check(ctx context.Context, force bool) (string, error) {
 	case version.Compare(m.Version, version.Version) <= 0:
 		u.set("idle", "agent is up to date")
 		return "agent " + version.Version + " is up to date", nil
-	case upd.IsBlocked(m.Version):
+	case slices.Contains(upd.Blocked, m.Version):
 		u.set("idle", "version "+m.Version+" failed here and is skipped")
 		return "version " + m.Version + " failed here before and is skipped", nil
 	case busy:
