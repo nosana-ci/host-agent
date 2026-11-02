@@ -44,6 +44,7 @@ type Supervisor struct {
 	wake    chan struct{}
 
 	mu        sync.Mutex
+	observed  bool
 	status    api.NodeStatus
 	image     string
 	restart   bool
@@ -71,10 +72,16 @@ func (s *Supervisor) Status() api.NodeStatus {
 	return s.status
 }
 
-// Busy reports whether the node runs a job or a benchmark, which updates must not interrupt.
+// Busy reports whether the node may run a job or a benchmark, which updates must not interrupt.
+// A node that was not observed yet, or runs without answering /node/info, counts as busy.
 func (s *Supervisor) Busy() bool {
-	st := s.Status()
-	return st.State != nil && (*st.State == "RUNNING_JOB" || *st.State == "BENCHMARKING")
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.observed {
+		return true
+	}
+	st := s.status
+	return st.Container == "running" && (st.State == nil || *st.State == "RUNNING_JOB" || *st.State == "BENCHMARKING")
 }
 
 func (s *Supervisor) Start() error   { return s.want(false, false) }
@@ -302,7 +309,7 @@ func (s *Supervisor) observe(ctr *podman.Container, image string) {
 	}
 	s.mu.Lock()
 	st.Desired, st.Restarts, st.LastError = s.status.Desired, s.status.Restarts, s.status.LastError
-	s.status = st
+	s.status, s.observed = st, true
 	s.mu.Unlock()
 }
 
