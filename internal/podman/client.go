@@ -49,7 +49,15 @@ func (c *Client) Info(ctx context.Context) (*Info, error) {
 }
 
 func (c *Client) NetworkExists(ctx context.Context, name string) (bool, error) {
-	err := c.call(ctx, http.MethodGet, "/networks/"+url.PathEscape(name)+"/exists", nil, nil, nil)
+	return c.exists(ctx, "/networks/"+url.PathEscape(name)+"/exists")
+}
+
+func (c *Client) ImageExists(ctx context.Context, ref string) (bool, error) {
+	return c.exists(ctx, "/images/"+url.PathEscape(ref)+"/exists")
+}
+
+func (c *Client) exists(ctx context.Context, path string) (bool, error) {
+	err := c.call(ctx, http.MethodGet, path, nil, nil, nil)
 	if errors.Is(err, ErrNotFound) {
 		return false, nil
 	}
@@ -70,47 +78,30 @@ func (c *Client) CreateNetwork(ctx context.Context, name, subnet, gateway string
 	return err
 }
 
-type Image struct {
-	ID string `json:"Id"`
-}
-
-func (c *Client) InspectImage(ctx context.Context, ref string) (*Image, error) {
-	var img Image
-	return &img, c.call(ctx, http.MethodGet, "/images/"+url.PathEscape(ref)+"/json", nil, nil, &img)
-}
-
-// Pull pulls ref and returns the image ID. Progress is streamed (not quiet), so the answer's
-// headers arrive at once and a long pull does not run into the header timeout.
-func (c *Client) Pull(ctx context.Context, ref string) (string, error) {
+// Pull pulls ref. Progress is streamed (not quiet), so the answer's headers arrive at once and a
+// long pull does not run into the header timeout.
+func (c *Client) Pull(ctx context.Context, ref string) error {
 	q := url.Values{"reference": {ref}, "policy": {"always"}}
 	resp, err := c.do(ctx, http.MethodPost, "/images/pull", q, nil)
 	if err != nil {
-		return "", err
+		return err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		return "", apiError(resp)
+		return apiError(resp)
 	}
-	var id string
 	dec := json.NewDecoder(resp.Body)
 	for {
 		var msg struct {
-			Error  string   `json:"error"`
-			ID     string   `json:"id"`
-			Images []string `json:"images"`
+			Error string `json:"error"`
 		}
 		if err := dec.Decode(&msg); err == io.EOF {
-			return id, nil
+			return nil
 		} else if err != nil {
-			return "", err
+			return err
 		}
 		if msg.Error != "" {
-			return "", fmt.Errorf("pull %s: %s", ref, msg.Error)
-		}
-		if msg.ID != "" {
-			id = msg.ID
-		} else if len(msg.Images) > 0 {
-			id = msg.Images[0]
+			return fmt.Errorf("pull %s: %s", ref, msg.Error)
 		}
 	}
 }

@@ -242,13 +242,15 @@ func (s *Supervisor) create(ctx context.Context, image string) error {
 	if image == "" {
 		return errors.New("no node image known yet; waiting for the release manifest")
 	}
-	if _, err := s.pc.InspectImage(ctx, image); errors.Is(err, podman.ErrNotFound) {
+	exists, err := s.pc.ImageExists(ctx, image)
+	if err != nil {
+		return err
+	}
+	if !exists {
 		slog.Info("node: pulling image", "image", image)
-		if _, err := s.pc.Pull(ctx, image); err != nil {
+		if err := s.pc.Pull(ctx, image); err != nil {
 			return err
 		}
-	} else if err != nil {
-		return err
 	}
 	spec := podman.Spec{
 		Name:    ContainerName,
