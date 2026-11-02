@@ -163,12 +163,6 @@ func (u *Updater) fail(err error) (string, error) {
 // once every command it took is answered.
 func (u *Updater) Ready() <-chan string { return u.ready }
 
-// Exec replaces this process with that agent; the node keeps running.
-func Exec(to string) {
-	slog.Info("switching to agent", "to", to)
-	execSelf()
-}
-
 func (u *Updater) installAgent(ctx context.Context, m *manifest.Manifest) error {
 	art := m.Agent.Artifacts.LinuxAmd64
 	if art.Url == "" {

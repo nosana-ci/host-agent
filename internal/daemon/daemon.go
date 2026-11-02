@@ -210,8 +210,10 @@ func (d *daemon) commandLoop(ctx context.Context) {
 		case switchTo = <-d.upd.Ready():
 		}
 		if switchTo != "" && len(d.cmds) == 0 {
-			updater.Exec(switchTo)
+			slog.Info("switching to agent", "to", switchTo)
+			updater.Exec()
 		}
+
 	}
 }
 

@@ -47,11 +47,12 @@ func rollback(st *store.Store, reason string) {
 		s.Update.LastRollback = fmt.Sprintf("%s: back on %s", reason, binVersion(p.Previous))
 		s.Update.Pending = nil
 	})
-	execSelf()
+	Exec()
 }
 
-// execSelf replaces this process with bin/current; the node keeps running.
-func execSelf() {
+// Exec replaces this process with bin/current; the node keeps running.
+func Exec() {
+
 	if err := syscall.Exec(config.CurrentBinary, os.Args, os.Environ()); err != nil {
 		slog.Error("exec failed", "err", err)
 		os.Exit(1)
