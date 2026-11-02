@@ -5,9 +5,9 @@
 # release, mark it as a pre-release on GitHub: "latest" then points at the previous one, and agents
 # never install a version lower than their own.
 #
-# CI variables: RELEASE_SIGNING_KEY (masked; the base64 ed25519 seed), RELEASE_PUBLIC_KEY,
-# NODE_IMAGE (the node image this release runs), GITHUB_TOKEN (set by infra/git; writes releases
-# on the mirror).
+# Project variables, set by infra/git from 1Password: RELEASE_SIGNING_KEY (the base64 ed25519 seed),
+# RELEASE_PUBLIC_KEY, GITHUB_TOKEN (writes releases on the mirror). NODE_IMAGE below is the node
+# image a release runs; change it here when the node moves.
 
 image: golang:1.27
 
@@ -15,6 +15,7 @@ stages: [test, release]
 
 variables:
   RUNTIME_VERSION: "5.8.8"
+  NODE_IMAGE: docker.io/nosana/nosana-node:latest
   GITHUB_REPO: nosana-ci/host-agent
 
 test:
