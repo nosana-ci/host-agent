@@ -35,7 +35,7 @@ func Run(ctx context.Context, controlURL string, pc *podman.Client, g api.GpuSta
 		checkDisk(),
 		checkPodman(ctx, pc),
 		checkFirewall(),
-		checkReach(ctx, "control", "host-manager reachable", controlURL+"/health", http.StatusOK),
+		checkReach(ctx, "control", "host-manager reachable", strings.TrimRight(controlURL, "/")+"/health", http.StatusOK),
 		// The registry answers 401 to anonymous clients, which is what a working one does.
 		checkReach(ctx, "registry", "Container registry reachable", "https://registry-1.docker.io/v2/", http.StatusUnauthorized),
 	}
@@ -157,8 +157,11 @@ func checkFirewall() api.Check {
 func checkReach(ctx context.Context, id, title, url string, expect int) api.Check {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	resp, err := netClient.Do(req)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	var resp *http.Response
+	if err == nil {
+		resp, err = netClient.Do(req)
+	}
 	if err != nil {
 		return withFix(check(id, title, api.Fail, err.Error()), "Check DNS, firewall and outbound HTTPS.")
 	}
