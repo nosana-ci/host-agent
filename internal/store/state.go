@@ -72,11 +72,18 @@ func (s *Store) State() State {
 	return s.state
 }
 
-// Update changes the state and writes it.
+// Update applies fn to a copy of the state and keeps the copy once it is written.
 func (s *Store) Update(fn func(*State)) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	fn(&s.state)
-	raw, _ := json.MarshalIndent(s.state, "", "  ")
-	return WriteFile(s.path, append(raw, '\n'), 0o600)
+	var next State
+	raw, _ := json.Marshal(s.state)
+	_ = json.Unmarshal(raw, &next) // a deep copy: fn may change Pending in place
+	fn(&next)
+	raw, _ = json.MarshalIndent(next, "", "  ")
+	if err := WriteFile(s.path, append(raw, '\n'), 0o600); err != nil {
+		return err
+	}
+	s.state = next
+	return nil
 }
