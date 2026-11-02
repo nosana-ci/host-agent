@@ -122,13 +122,17 @@ func (u *Updater) Check(ctx context.Context, force bool) (string, error) {
 	u.mu.Unlock()
 	u.sup.SetImage(m.Node.Image)
 
-	busy := u.sup.Busy() && !force
 	// The runtime only moves up: a halted release must not downgrade podman under its database.
 	if cur := bundle.Current(); version.Compare(m.Runtime.Version, cur) > 0 && !slices.Contains(u.st.State().Update.BlockedRuntime, m.Runtime.Version) {
-		if busy {
-			return u.done("deferred", "runtime "+m.Runtime.Version+" waits until the node is idle")
+		u.set("downloading", "runtime "+m.Runtime.Version)
+		ver, err := bundle.Install(ctx, m) // the download does not touch the node; the switch does
+		if err != nil {
+			return u.fail(err)
 		}
-		if err := u.switchRuntime(ctx, m, cur); err != nil {
+		if u.sup.Busy() && !force {
+			return u.done("deferred", "runtime "+ver+" waits until the node is idle")
+		}
+		if err := u.switchRuntime(ctx, ver, cur); err != nil {
 			return u.fail(err)
 		}
 	}
@@ -138,7 +142,7 @@ func (u *Updater) Check(ctx context.Context, force bool) (string, error) {
 		return u.done("idle", "agent "+version.Version+" is up to date")
 	case slices.Contains(upd.Blocked, m.Version):
 		return u.done("idle", "version "+m.Version+" failed here before and is skipped")
-	case busy:
+	case u.sup.Busy() && !force:
 		return u.done("deferred", "update to "+m.Version+" waits until the node is idle")
 	}
 	u.set("downloading", "agent "+m.Version)
@@ -203,15 +207,11 @@ func (u *Updater) commit() {
 	u.set("idle", "")
 }
 
-// switchRuntime installs the manifest's runtime bundle, restarts the podman service on it and
-// goes back to the old bundle when podman does not come up.
-func (u *Updater) switchRuntime(ctx context.Context, m *manifest.Manifest, old string) error {
-	u.set("downloading", "runtime "+m.Runtime.Version)
-	ver, err := bundle.Install(ctx, m)
-	if err != nil {
-		return err
-	}
+// switchRuntime restarts the podman service on the installed bundle ver and goes back to the old
+// bundle when podman does not come up.
+func (u *Updater) switchRuntime(ctx context.Context, ver, old string) error {
 	if err := u.activate(ctx, ver); err == nil {
+
 		slog.Info("runtime switched", "from", old, "to", ver)
 		bundle.Prune(old)
 		return nil
