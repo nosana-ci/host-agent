@@ -37,7 +37,7 @@ func Run(ctx context.Context, o Options, out io.Writer) (err error) {
 	if os.Geteuid() != 0 {
 		return errors.New("run with sudo")
 	}
-	say := func(format string, args ...any) { fmt.Fprintf(out, "• "+format+"\n", args...) }
+	say := sayTo(out)
 
 	cfg, err := config.Load()
 	if err == nil {
@@ -158,22 +158,23 @@ func Uninstall(ctx context.Context, purge bool, out io.Writer) error {
 	if os.Geteuid() != 0 {
 		return errors.New("run with sudo")
 	}
+	say := sayTo(out)
 	_ = service.Systemctl("stop", service.AgentUnit)
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
 	pc := podman.New(config.PodmanSocket)
 	if err := pc.StopContainer(ctx, node.ContainerName, 2*time.Minute); err == nil {
-		fmt.Fprintln(out, "• node container stopped")
+		say("node container stopped")
 	}
 	if err := pc.RemoveContainer(ctx, node.ContainerName); err != nil {
-		fmt.Fprintf(out, "• warning: the node container was not removed (%v); remove it with podman\n", err)
+		say("warning: the node container was not removed (%v); remove it with podman", err)
 	}
 	_ = service.Systemctl("disable", "--now", service.PodmanUnit, service.AgentUnit)
 	_ = os.Remove(filepath.Join(service.UnitDir, service.AgentUnit))
 	_ = os.Remove(filepath.Join(service.UnitDir, service.PodmanUnit))
 	_ = os.Remove(config.CLIPath)
 	_ = service.Systemctl("daemon-reload")
-	fmt.Fprintln(out, "• services removed")
+	say("services removed")
 	if !purge {
 		return nil
 	}
@@ -182,7 +183,7 @@ func Uninstall(ctx context.Context, purge bool, out io.Writer) error {
 		if err != nil {
 			return fmt.Errorf("the node wallet could not be backed up, so nothing was deleted: %w", err)
 		}
-		fmt.Fprintf(out, "• wallet backed up to %s\n", backup)
+		say("wallet backed up to %s", backup)
 	}
 	// Podman storage holds files owned by other uids; let podman clean it up.
 	reset := exec.CommandContext(ctx, config.RuntimePodman, "--root", config.PodmanRoot, "--runroot", config.PodmanRunRoot, "system", "reset", "--force")
@@ -191,8 +192,13 @@ func Uninstall(ctx context.Context, purge bool, out io.Writer) error {
 	_ = os.RemoveAll(config.StateDir)
 	_ = os.RemoveAll(config.RunDir)
 	_ = os.Remove(config.Path)
-	fmt.Fprintln(out, "• state and config deleted")
+	say("state and config deleted")
 	return nil
+}
+
+// sayTo writes the "• " progress lines of install and uninstall.
+func sayTo(out io.Writer) func(format string, args ...any) {
+	return func(format string, args ...any) { fmt.Fprintf(out, "• "+format+"\n", args...) }
 }
 
 func backupWallet() (string, error) {
