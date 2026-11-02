@@ -40,11 +40,11 @@ type Updater struct {
 	apply  sync.Mutex // one Check applies at a time: Run and the commands may call it together
 	mu     sync.Mutex
 	status api.UpdateStatus
-	ready  string // the agent version installAgent linked in, waiting for Exec
+	ready  chan string // the agent version installAgent linked in
 }
 
 func New(cfg config.Config, st *store.Store, sup *node.Supervisor, pc *podman.Client) *Updater {
-	u := &Updater{cfg: cfg, st: st, sup: sup, pc: pc, status: api.UpdateStatus{State: "idle"}}
+	u := &Updater{cfg: cfg, st: st, sup: sup, pc: pc, ready: make(chan string, 1), status: api.UpdateStatus{State: "idle"}}
 	if p := st.State().Update.Pending; p != nil && p.Version == version.Version {
 		u.set("pending", "version "+p.Version+" is kept after "+keepAfter.String()+" up")
 	}
@@ -77,7 +77,6 @@ func (u *Updater) Run(ctx context.Context) {
 		if _, err := u.Check(ctx, false); err != nil && ctx.Err() == nil {
 			slog.Warn("update check", "err", err)
 		}
-		u.Exec()
 		select {
 		case <-ctx.Done():
 			if keep != nil { // a clean stop is not a failed start
@@ -149,16 +148,14 @@ func (u *Updater) Check(ctx context.Context, force bool) (string, error) {
 	return "switching to agent " + m.Version, nil
 }
 
-// Exec switches to the agent installAgent linked in, once the caller has reported the result.
-// It does not return then; the node keeps running.
-func (u *Updater) Exec() {
-	u.mu.Lock()
-	to := u.ready
-	u.mu.Unlock()
-	if to != "" {
-		slog.Info("switching to agent", "to", to)
-		execSelf()
-	}
+// Ready announces the agent version installAgent linked in. The caller switches to it with Exec
+// once every command it took is answered.
+func (u *Updater) Ready() <-chan string { return u.ready }
+
+// Exec replaces this process with that agent; the node keeps running.
+func Exec(to string) {
+	slog.Info("switching to agent", "to", to)
+	execSelf()
 }
 
 func (u *Updater) installAgent(ctx context.Context, m *manifest.Manifest) error {
@@ -189,9 +186,7 @@ func (u *Updater) installAgent(ctx context.Context, m *manifest.Manifest) error 
 		_ = u.st.Update(func(s *store.State) { s.Update.Pending = nil })
 		return err
 	}
-	u.mu.Lock()
-	u.ready = m.Version
-	u.mu.Unlock()
+	u.ready <- m.Version
 	return nil
 }
 

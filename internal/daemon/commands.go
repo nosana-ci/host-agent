@@ -51,7 +51,7 @@ func verbs() []string {
 	return out
 }
 
-// runCommands executes commands one at a time and reports each result.
+// runCommands executes commands in order and reports each result.
 func (d *daemon) runCommands(ctx context.Context, cmds []api.AgentCommand) {
 	for _, c := range cmds {
 		msg, err := d.run(ctx, c)
@@ -63,7 +63,6 @@ func (d *daemon) runCommands(ctx context.Context, cmds []api.AgentCommand) {
 		if err := d.ctrl.Report(ctx, c.Id, result); err != nil {
 			slog.Warn("report command result", "id", c.Id, "err", err)
 		}
-		d.upd.Exec() // an update command switches binaries only after its result is in
 	}
 }
 

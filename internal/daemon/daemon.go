@@ -39,6 +39,7 @@ type daemon struct {
 	sup  *node.Supervisor
 	upd  *updater.Updater
 	ctrl *control.Client
+	cmds chan []api.AgentCommand
 
 	mu     sync.Mutex
 	gpu    api.GpuStatus
@@ -68,6 +69,7 @@ func Run(ctx context.Context) error {
 		cfg: cfg, st: st, pc: pc, sup: sup,
 		upd:  updater.New(cfg, st, sup, pc),
 		ctrl: control.New(cfg.ControlURL, wallet),
+		cmds: make(chan []api.AgentCommand, 16),
 		// host-manager wants arrays before the first doctor run too
 		gpu:    api.GpuStatus{Gpus: []api.Gpu{}},
 		checks: []api.Check{},
@@ -75,7 +77,7 @@ func Run(ctx context.Context) error {
 	slog.Info("nosana-host", "version", version.Version, "node", keys.Address(wallet), "control", cfg.ControlURL)
 
 	var wg sync.WaitGroup
-	for _, run := range []func(context.Context){d.sup.Run, d.upd.Run, d.doctorLoop, d.heartbeatLoop, d.commandLoop} {
+	for _, run := range []func(context.Context){d.sup.Run, d.upd.Run, d.doctorLoop, d.heartbeatLoop, d.pollLoop, d.commandLoop} {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -161,12 +163,12 @@ func (d *daemon) heartbeat(ctx context.Context) error {
 	case err != nil:
 		return fmt.Errorf("heartbeat: %w", err)
 	}
-	d.runCommands(ctx, cmds)
+	d.queue(ctx, cmds)
 	return nil
 }
 
-// commandLoop long-polls for commands while the host is linked.
-func (d *daemon) commandLoop(ctx context.Context) {
+// pollLoop long-polls for commands while the host is linked.
+func (d *daemon) pollLoop(ctx context.Context) {
 	for ctx.Err() == nil {
 		if !d.st.State().Claimed {
 			sleep(ctx, heartbeatEvery)
@@ -180,7 +182,37 @@ func (d *daemon) commandLoop(ctx context.Context) {
 			sleep(ctx, heartbeatEvery)
 			continue
 		}
-		d.runCommands(ctx, cmds)
+		d.queue(ctx, cmds)
+	}
+}
+
+// queue hands commands to commandLoop. host-manager delivers each command once, so the heartbeat
+// and the long-poll must not drop or run them themselves.
+func (d *daemon) queue(ctx context.Context, cmds []api.AgentCommand) {
+	if len(cmds) == 0 {
+		return
+	}
+	select {
+	case d.cmds <- cmds:
+	case <-ctx.Done():
+	}
+}
+
+// commandLoop runs the queued commands one at a time, and switches to a new agent only when no
+// command is waiting: every command it took is answered before the process is replaced.
+func (d *daemon) commandLoop(ctx context.Context) {
+	var switchTo string
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case cmds := <-d.cmds:
+			d.runCommands(ctx, cmds)
+		case switchTo = <-d.upd.Ready():
+		}
+		if switchTo != "" && len(d.cmds) == 0 {
+			updater.Exec(switchTo)
+		}
 	}
 }
 
