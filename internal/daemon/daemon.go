@@ -46,15 +46,16 @@ type daemon struct {
 }
 
 func Run(ctx context.Context) error {
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("not installed: %w", err)
-	}
 	st, err := store.Open(config.StatePath)
 	if err != nil {
 		return err
 	}
-	updater.Preflight(st)
+	updater.Preflight(st) // before anything a new version could fail at
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("not installed: %w", err)
+	}
+
 	if changed, err := service.WriteUnits(); err == nil && changed {
 		_ = service.Systemctl("daemon-reload") // the new units take effect at the next restart
 	}
