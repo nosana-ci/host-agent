@@ -38,6 +38,8 @@ type Updater struct {
 	st  *store.Store
 	sup *node.Supervisor
 	pc  *podman.Client
+	// proving is set when this process is a pending version that must stay up keepAfter.
+	proving bool
 
 	apply  sync.Mutex // one Check applies at a time: Run and the commands may call it together
 	mu     sync.Mutex
@@ -48,6 +50,7 @@ type Updater struct {
 func New(cfg config.Config, st *store.Store, sup *node.Supervisor, pc *podman.Client) *Updater {
 	u := &Updater{cfg: cfg, st: st, sup: sup, pc: pc, ready: make(chan string, 1), status: api.UpdateStatus{State: "idle"}}
 	if p := st.State().Update.Pending; p != nil && p.Version == version.Version {
+		u.proving = true
 		u.set("pending", "version "+p.Version+" is kept after "+keepAfter.String()+" up")
 	}
 	return u
@@ -72,7 +75,7 @@ func (u *Updater) set(state, detail string) {
 // once this process has been up for keepAfter.
 func (u *Updater) Run(ctx context.Context) {
 	var keep <-chan time.Time
-	if p := u.st.State().Update.Pending; p != nil && p.Version == version.Version {
+	if u.proving {
 		keep = time.After(keepAfter)
 	}
 	next := time.After(firstCheck)
