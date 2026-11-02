@@ -61,7 +61,6 @@ WantedBy=multi-user.target
 `, config.CurrentBinary),
 }
 
-// WriteUnits writes both unit files and reports whether any changed.
 func WriteUnits() (bool, error) {
 	changed := false
 	for name, text := range units {

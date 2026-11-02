@@ -146,7 +146,6 @@ func (s *Supervisor) setError(msg string) {
 	s.status.LastError = &msg
 }
 
-// reconcile brings the container to the desired state and refreshes the status.
 func (s *Supervisor) reconcile(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute) // a first pull can be slow
 	defer cancel()

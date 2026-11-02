@@ -51,7 +51,6 @@ func verbs() []string {
 	return out
 }
 
-// runCommands executes commands in order and reports each result.
 func (d *daemon) runCommands(ctx context.Context, cmds []api.AgentCommand) {
 	for _, c := range cmds {
 		msg, err := d.run(ctx, c)

@@ -30,7 +30,6 @@ func WriteFile(path string, data []byte, mode os.FileMode) error {
 	return syncDir(filepath.Dir(path))
 }
 
-// Relink points the symlink link at target in one step.
 func Relink(link, target string) error {
 	tmp := link + ".new"
 	_ = os.Remove(tmp)

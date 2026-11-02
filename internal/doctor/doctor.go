@@ -27,7 +27,6 @@ const minDriver = 550
 
 var netClient = &http.Client{Timeout: 5 * time.Second}
 
-// Run detects the GPUs and executes every check.
 func Run(ctx context.Context, controlURL string, pc *podman.Client) (api.GpuStatus, []api.Check) {
 	g, gpuErr := detectGPUs(ctx)
 	checks := []api.Check{

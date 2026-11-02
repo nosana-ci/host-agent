@@ -148,7 +148,6 @@ func (u *Updater) Check(ctx context.Context, force bool) (string, error) {
 	return "switching to agent " + m.Version, nil
 }
 
-// done sets the status and returns its detail as Check's result.
 func (u *Updater) done(state, detail string) (string, error) {
 	u.set(state, detail)
 	return detail, nil
