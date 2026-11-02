@@ -35,10 +35,8 @@ var commands = []struct {
 		}
 		return "fixed " + id + "; " + summary(d.runDoctor(ctx)), nil
 	}},
-	{"check-update", func(d *daemon, ctx context.Context, _ map[string]any) (string, error) {
-		return d.upd.Check(ctx, false)
-	}},
 	{"update", func(d *daemon, ctx context.Context, _ map[string]any) (string, error) {
+
 		return d.upd.Check(ctx, true)
 	}},
 }

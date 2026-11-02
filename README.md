@@ -48,8 +48,9 @@ Install script: `host-console/public/install.sh`.
   Commands come back in the
   answer and through a 25 s long-poll; each is answered done or failed with a message.
 - **Commands.** `restart-node`, `stop-node`, `start-node`, `run-doctor`, `fix-check` (podman
-  service restart, nftables install, nvidia-persistenced), `check-update`, `update` (also while the
-  node is busy). The heartbeat lists them, so the console shows what this agent can do.
+  service restart, nftables install, nvidia-persistenced), `update` (also while the node is busy).
+  The heartbeat lists them, so the console shows what this agent can do.
+
 - **Updates.** Every 10 minutes the agent reads `stable.json` from the release URL, verifies its signature with
   the release key built into it, and when the node is idle: switches the runtime bundle (and goes
   back when podman does not come up within 45 s), swaps the node image, and installs a newer agent:
