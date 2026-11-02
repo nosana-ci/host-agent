@@ -179,7 +179,11 @@ func (s *Supervisor) reconcile(ctx context.Context) error {
 		}
 		return nil
 	case ctr == nil:
+		s.mu.Lock()
+		s.restart = false // creating is the restart
+		s.mu.Unlock()
 		return s.create(ctx, image)
+
 	case restart:
 		slog.Info("node: restarting")
 		if err := s.pc.StopContainer(ctx, ContainerName, stopTimeout); err != nil {
