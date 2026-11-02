@@ -112,8 +112,7 @@ func (u *Updater) Check(ctx context.Context, force bool) (string, error) {
 	u.set("checking", "")
 	m, err := manifest.Fetch(ctx, u.cfg.ReleaseURL)
 	if err != nil {
-		u.set("error", err.Error())
-		return "", err
+		return u.fail(err)
 	}
 	u.mu.Lock()
 	u.status.LatestVersion = &m.Version
@@ -124,32 +123,37 @@ func (u *Updater) Check(ctx context.Context, force bool) (string, error) {
 	// The runtime only moves up: a halted release must not downgrade podman under its database.
 	if cur := bundle.Current(); version.Compare(m.Runtime.Version, cur) > 0 && !slices.Contains(u.st.State().Update.BlockedRuntime, m.Runtime.Version) {
 		if busy {
-			u.set("deferred", "runtime "+m.Runtime.Version+" waits until the node is idle")
-			return "runtime update to " + m.Runtime.Version + " deferred: the node is busy", nil
+			return u.done("deferred", "runtime "+m.Runtime.Version+" waits until the node is idle")
 		}
 		if err := u.switchRuntime(ctx, m, cur); err != nil {
-			u.set("error", err.Error())
-			return "", err
+			return u.fail(err)
 		}
 	}
 	upd := u.st.State().Update
 	switch {
 	case version.Compare(m.Version, version.Version) <= 0:
-		u.set("idle", "agent is up to date")
-		return "agent " + version.Version + " is up to date", nil
+		return u.done("idle", "agent "+version.Version+" is up to date")
 	case slices.Contains(upd.Blocked, m.Version):
-		u.set("idle", "version "+m.Version+" failed here and is skipped")
-		return "version " + m.Version + " failed here before and is skipped", nil
+		return u.done("idle", "version "+m.Version+" failed here before and is skipped")
 	case busy:
-		u.set("deferred", "update to "+m.Version+" waits until the node is idle")
-		return "update to " + m.Version + " deferred: the node is busy", nil
+		return u.done("deferred", "update to "+m.Version+" waits until the node is idle")
 	}
 	u.set("downloading", "agent "+m.Version)
 	if err := u.installAgent(ctx, m); err != nil {
-		u.set("error", err.Error())
-		return "", err
+		return u.fail(err)
 	}
 	return "switching to agent " + m.Version, nil
+}
+
+// done sets the status and returns its detail as Check's result.
+func (u *Updater) done(state, detail string) (string, error) {
+	u.set(state, detail)
+	return detail, nil
+}
+
+func (u *Updater) fail(err error) (string, error) {
+	u.set("error", err.Error())
+	return "", err
 }
 
 // Ready announces the agent version installAgent linked in. The caller switches to it with Exec
