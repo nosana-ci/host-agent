@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -22,8 +21,8 @@ import (
 	"github.com/nosana-ci/host-agent/internal/service"
 )
 
-// MinDriver is the oldest NVIDIA driver major version the node supports.
-const MinDriver = 550
+// minDriver is the oldest NVIDIA driver major version the node supports.
+const minDriver = 550
 
 var netClient = &http.Client{Timeout: 5 * time.Second}
 
@@ -190,11 +189,12 @@ func gpuChecks(g api.GpuStatus, gpuErr error) []api.Check {
 		driver = *g.Driver
 	}
 	checks := []api.Check{check("gpu", "NVIDIA GPU", api.Ok, strings.Join(names, ", "))}
-	title := fmt.Sprintf("NVIDIA driver %d or newer", MinDriver)
-	if major, _ := strconv.Atoi(regexp.MustCompile(`^\d+`).FindString(driver)); major >= MinDriver {
+	title := fmt.Sprintf("NVIDIA driver %d or newer", minDriver)
+	major, _, _ := strings.Cut(driver, ".")
+	if n, _ := strconv.Atoi(major); n >= minDriver {
 		checks = append(checks, check("driver", title, api.Ok, driver))
 	} else {
-		checks = append(checks, withFix(check("driver", title, api.Fail, driver), fmt.Sprintf("Upgrade the NVIDIA driver to R%d or newer, then reboot.", MinDriver)))
+		checks = append(checks, withFix(check("driver", title, api.Fail, driver), fmt.Sprintf("Upgrade the NVIDIA driver to R%d or newer, then reboot.", minDriver)))
 	}
 	if _, err := exec.LookPath("nvidia-ctk"); err == nil {
 		checks = append(checks, check("ctk", "NVIDIA Container Toolkit", api.Ok, ""))
