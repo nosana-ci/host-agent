@@ -32,9 +32,8 @@ type Artifacts struct {
 }
 
 type Manifest struct {
-	Version     string    `json:"version"`
-	PublishedAt time.Time `json:"publishedAt"`
-	Agent       struct {
+	Version string `json:"version"`
+	Agent   struct {
 		Artifacts Artifacts `json:"artifacts"`
 	} `json:"agent"`
 	Runtime struct {

@@ -9,7 +9,7 @@ import (
 
 func TestVerify(t *testing.T) {
 	pub, key, _ := ed25519.GenerateKey(rand.Reader)
-	raw := []byte(`{"version":"1.2.0","publishedAt":"2026-10-30T10:00:00Z","agent":{"artifacts":{}},"runtime":{"version":"5.8.8","artifacts":{}},"node":{"image":"x"}}`)
+	raw := []byte(`{"version":"1.2.0","agent":{"artifacts":{}},"runtime":{"version":"5.8.8","artifacts":{}},"node":{"image":"x"}}`)
 	sig := base64.StdEncoding.EncodeToString(ed25519.Sign(key, raw))
 
 	m, err := Verify(raw, sig, pub)

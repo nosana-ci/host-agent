@@ -17,7 +17,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/nosana-ci/host-agent/internal/manifest"
 )
@@ -60,7 +59,6 @@ func run(args []string) error {
 	if err != nil || len(seed) != ed25519.SeedSize {
 		return fmt.Errorf("RELEASE_SIGNING_KEY must be a base64 ed25519 seed")
 	}
-	m.PublishedAt = time.Now().UTC().Truncate(time.Second)
 	text, err := json.Marshal(m)
 	if err != nil {
 		return err
