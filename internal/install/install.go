@@ -33,7 +33,7 @@ type Options struct {
 	Token      string
 }
 
-func Run(ctx context.Context, o Options, out io.Writer) error {
+func Run(ctx context.Context, o Options, out io.Writer) (err error) {
 	if os.Geteuid() != 0 {
 		return errors.New("run with sudo")
 	}
@@ -43,6 +43,11 @@ func Run(ctx context.Context, o Options, out io.Writer) error {
 	if err == nil {
 		say("found an existing install, repairing it")
 		_ = service.Systemctl("stop", service.AgentUnit) // it would overwrite the state we change
+		defer func() {
+			if err != nil {
+				_ = service.Systemctl("start", service.AgentUnit)
+			}
+		}()
 	}
 	if o.ControlURL != "" {
 		cfg.ControlURL = o.ControlURL
