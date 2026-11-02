@@ -112,7 +112,7 @@ func cmdStatus() error {
 	case err != nil:
 		fmt.Printf("node        podman not reachable (%v)\n", err)
 	default:
-		fmt.Printf("node        %s (%s)\n", ctr.State.Status, ctr.Config.Labels["io.nosana.host.image"])
+		fmt.Printf("node        %s (%s)\n", ctr.State.Status, ctr.Config.Labels[node.LabelImage])
 	}
 	if s.Update.LastRollback != "" || s.Update.Pending != nil {
 		raw, _ := json.Marshal(s.Update)
