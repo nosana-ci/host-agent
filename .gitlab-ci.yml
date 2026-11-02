@@ -1,9 +1,11 @@
 # Tests on every change; a tag v<version> builds linux-amd64, builds the runtime bundle, uploads
-# both to this project's generic package registry, and publishes the signed manifest to
-# host-manager, all in one job.
+# both to this project's generic package registry and then the signed manifest (stable.json and
+# stable.json.sig under the package version "stable"), all in one job. Agents and install.sh read
+# the manifest from there. To halt a release, re-run this job on the previous tag: it republishes
+# that manifest as stable, and agents never install a version lower than their own.
 #
 # CI variables: RELEASE_SIGNING_KEY (masked; the base64 ed25519 seed), RELEASE_PUBLIC_KEY,
-# HOST_MANAGER_URL, NODE_IMAGE (the node image this release runs).
+# NODE_IMAGE (the node image this release runs).
 
 image: golang:1.27
 
@@ -42,6 +44,9 @@ release:
         --runtime-version "$RUNTIME_VERSION"
         --runtime "$REGISTRY/$RUNTIME_FILE" --runtime-sha "$(sha256sum "bin/$RUNTIME_FILE" | cut -d' ' -f1)"
         --node-image "$NODE_IMAGE"
-        --host-manager "$HOST_MANAGER_URL"
+        --out bin
+    - export STABLE="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/nosana-host/stable"
+    - 'curl -fsS --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file bin/stable.json "$STABLE/stable.json"'
+    - 'curl -fsS --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file bin/stable.json.sig "$STABLE/stable.json.sig"'
   artifacts:
     paths: [bin/]

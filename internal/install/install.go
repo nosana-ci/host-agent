@@ -17,17 +17,18 @@ import (
 
 	"github.com/nosana-ci/nosana-host/internal/config"
 	"github.com/nosana-ci/nosana-host/internal/keys"
+	"github.com/nosana-ci/nosana-host/internal/manifest"
 	"github.com/nosana-ci/nosana-host/internal/node"
 	"github.com/nosana-ci/nosana-host/internal/podman"
 	"github.com/nosana-ci/nosana-host/internal/runtime"
 	"github.com/nosana-ci/nosana-host/internal/service"
 	"github.com/nosana-ci/nosana-host/internal/store"
-	"github.com/nosana-ci/nosana-host/internal/updater"
 	"github.com/nosana-ci/nosana-host/internal/version"
 )
 
 type Options struct {
 	ControlURL string
+	ReleaseURL string
 	Network    string
 	Token      string
 }
@@ -45,11 +46,14 @@ func Run(ctx context.Context, o Options, out io.Writer) error {
 	if o.ControlURL != "" {
 		cfg.ControlURL = o.ControlURL
 	}
+	if o.ReleaseURL != "" {
+		cfg.ReleaseURL = o.ReleaseURL
+	}
 	if o.Network != "" {
 		cfg.Network = o.Network
 	}
-	if cfg.ControlURL == "" || (cfg.Network != "mainnet" && cfg.Network != "devnet") {
-		return errors.New("--control-url and --network (mainnet or devnet) are required on a first install")
+	if cfg.ControlURL == "" || cfg.ReleaseURL == "" || (cfg.Network != "mainnet" && cfg.Network != "devnet") {
+		return errors.New("--control-url, --release-url and --network (mainnet or devnet) are required on a first install")
 	}
 	for _, d := range []string{config.BinDir, config.NodeDir, config.PodmanRoot, config.RuntimeDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
@@ -85,9 +89,9 @@ func Run(ctx context.Context, o Options, out io.Writer) error {
 	}
 	_ = st.Update(func(s *store.State) { s.Update.Pending = nil })
 
-	m, err := updater.FetchManifest(ctx, cfg.ControlURL)
+	m, err := manifest.Fetch(ctx, cfg.ReleaseURL)
 	if err != nil {
-		return fmt.Errorf("read the release from %s: %w", cfg.ControlURL, err)
+		return fmt.Errorf("read the release from %s: %w", cfg.ReleaseURL, err)
 	}
 	if err := runtime.EnsureFirewallTool(ctx); err != nil {
 		say("warning: %v", err)

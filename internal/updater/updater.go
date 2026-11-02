@@ -14,6 +14,7 @@ import (
 
 	"github.com/nosana-ci/nosana-host/internal/api"
 	"github.com/nosana-ci/nosana-host/internal/config"
+	"github.com/nosana-ci/nosana-host/internal/manifest"
 	"github.com/nosana-ci/nosana-host/internal/node"
 	"github.com/nosana-ci/nosana-host/internal/podman"
 	"github.com/nosana-ci/nosana-host/internal/runtime"
@@ -87,7 +88,7 @@ func (u *Updater) Check(ctx context.Context, force bool) (string, error) {
 		return "version " + p.Version + " is still proving itself", nil
 	}
 	u.set("checking", "")
-	m, err := FetchManifest(ctx, u.cfg.ControlURL)
+	m, err := manifest.Fetch(ctx, u.cfg.ReleaseURL)
 	if err != nil {
 		u.set("error", err.Error())
 		return "", err
@@ -136,7 +137,7 @@ func (u *Updater) Poke() {
 	}
 }
 
-func (u *Updater) installAgent(ctx context.Context, m *api.ReleaseManifest) error {
+func (u *Updater) installAgent(ctx context.Context, m *manifest.Manifest) error {
 	art := m.Agent.Artifacts.LinuxAmd64
 	if art.Url == "" {
 		return fmt.Errorf("release %s has no %s build", m.Version, runtime.Platform)
@@ -192,7 +193,7 @@ func (u *Updater) Unhealthy() {
 
 // switchRuntime installs the manifest's runtime bundle, restarts the podman service on it and
 // goes back to the old bundle when podman does not come up.
-func (u *Updater) switchRuntime(ctx context.Context, m *api.ReleaseManifest, old string) error {
+func (u *Updater) switchRuntime(ctx context.Context, m *manifest.Manifest, old string) error {
 	u.set("downloading", "runtime "+m.Runtime.Version)
 	ver, err := runtime.Install(ctx, m)
 	if err != nil {

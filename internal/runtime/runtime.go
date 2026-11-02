@@ -18,8 +18,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nosana-ci/nosana-host/internal/api"
 	"github.com/nosana-ci/nosana-host/internal/config"
+	"github.com/nosana-ci/nosana-host/internal/manifest"
 	"github.com/nosana-ci/nosana-host/internal/store"
 	"github.com/nosana-ci/nosana-host/internal/updater/download"
 )
@@ -38,7 +38,7 @@ func Current() string {
 
 // Install downloads the manifest's runtime bundle, unpacks it next to the other versions and
 // writes its configuration. It does not activate it. Returns the version.
-func Install(ctx context.Context, m *api.ReleaseManifest) (string, error) {
+func Install(ctx context.Context, m *manifest.Manifest) (string, error) {
 	art := m.Runtime.Artifacts.LinuxAmd64
 	if art.Url == "" {
 		return "", errors.New("the release has no runtime bundle for " + Platform)

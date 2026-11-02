@@ -1,4 +1,4 @@
-package updater
+package manifest
 
 import (
 	"crypto/ed25519"

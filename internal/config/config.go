@@ -18,6 +18,7 @@ const (
 
 type Config struct {
 	ControlURL string `json:"controlUrl"` // host-manager
+	ReleaseURL string `json:"releaseUrl"` // where stable.json and stable.json.sig live
 	Network    string `json:"network"`    // mainnet | devnet
 }
 

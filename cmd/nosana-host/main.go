@@ -27,7 +27,7 @@ import (
 const usage = `nosana-host runs the Nosana node on this machine and reports to host-manager.
 
 Usage:
-  nosana-host install --control-url URL --network mainnet|devnet [--token T]   install or repair (sudo)
+  nosana-host install --control-url URL --release-url URL --network mainnet|devnet [--token T]   install or repair (sudo)
   nosana-host uninstall [--purge]       remove the services; --purge also deletes state after backing the wallet up
   nosana-host status                    what the agent knows: node address, link, node container
   nosana-host daemon                    run the agent (what the service runs)
@@ -70,6 +70,7 @@ func cmdInstall(args []string) error {
 	fs := flag.NewFlagSet("install", flag.ExitOnError)
 	var o install.Options
 	fs.StringVar(&o.ControlURL, "control-url", "", "host-manager URL")
+	fs.StringVar(&o.ReleaseURL, "release-url", "", "where stable.json and stable.json.sig live")
 	fs.StringVar(&o.Network, "network", "", "mainnet or devnet")
 	fs.StringVar(&o.Token, "token", "", "claim token from the console's install command")
 	_ = fs.Parse(args)
