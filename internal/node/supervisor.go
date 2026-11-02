@@ -49,6 +49,7 @@ type Supervisor struct {
 	status    api.NodeStatus
 	image     string
 	start     bool // start an exited node at once, without the crash backoff
+	restarted bool // the restart happened but the state could not record it
 	crashes   int
 	nextStart time.Time
 }
@@ -98,14 +99,21 @@ func (s *Supervisor) want(stopped, restart bool) error {
 		return err
 	}
 	s.mu.Lock()
-	s.start, s.crashes, s.nextStart = !stopped, 0, time.Time{}
+	s.start, s.restarted, s.crashes, s.nextStart = !stopped, false, 0, time.Time{}
 	s.mu.Unlock()
 	s.poke()
 	return nil
 }
 
-func (s *Supervisor) restarted() {
-	_ = s.st.Update(func(state *store.State) { state.NodeRestart = false })
+// restartDone clears the restart. When the state cannot be written the restart is remembered as
+// done in memory, so an unwritable disk does not restart the node every tick.
+func (s *Supervisor) restartDone() {
+	if err := s.st.Update(func(state *store.State) { state.NodeRestart = false }); err != nil {
+		slog.Warn("node: restart not recorded", "err", err)
+		s.mu.Lock()
+		s.restarted = true
+		s.mu.Unlock()
+	}
 }
 
 // SetImage changes the node image; the container is recreated once the node is idle.
@@ -156,7 +164,7 @@ func (s *Supervisor) reconcile(ctx context.Context) error {
 	defer cancel()
 	state := s.st.State()
 	s.mu.Lock()
-	image := s.image
+	image, restart := s.image, state.NodeRestart && !s.restarted
 	s.status.Desired = desired(state)
 	s.mu.Unlock()
 
@@ -183,17 +191,18 @@ func (s *Supervisor) reconcile(ctx context.Context) error {
 		}
 		return nil
 	case ctr == nil:
-		if state.NodeRestart {
-			s.restarted() // creating is the restart
+		if restart {
+			s.restartDone() // creating is the restart
 		}
 		return s.create(ctx, image)
-	case state.NodeRestart:
+	case restart:
 		slog.Info("node: restarting")
 		if err := s.pc.StopContainer(ctx, ContainerName, stopTimeout); err != nil {
 			return err
 		}
-		s.restarted() // only once it happened; podman may have been away
+		s.restartDone() // only once it happened; podman may have been away
 		return s.pc.StartContainer(ctx, ContainerName)
+
 	case image != "" && (ctr.Config.Labels[LabelImage] != image || ctr.Config.Labels[labelNetwork] != s.network) && !s.Busy():
 		pulled, err := s.ensureImage(ctx, image) // the node keeps running during the pull
 		if err != nil || pulled {
