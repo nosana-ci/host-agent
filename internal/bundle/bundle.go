@@ -133,7 +133,6 @@ const jobLogSizeMax = 50 << 20
 // configure writes the bundle's containers.conf, registries.conf and the env file the podman
 // unit loads, with absolute paths, so the bundle never relies on /etc/containers.
 func configure(dir string) error {
-	final := filepath.Join(config.RuntimeDir, strings.TrimSuffix(filepath.Base(dir), ".unpack"))
 	etc := filepath.Join(dir, "etc")
 	firewall := ""
 	if fw := FirewallDriver(); fw != "" {
@@ -161,10 +160,10 @@ runc = [%q]
 
 [network]
 network_backend = "netavark"
-%s`, filepath.Join(final, "etc", "seccomp.json"), jobLogSizeMax,
-		filepath.Join(final, "lib", "podman"), filepath.Join(final, "bin"),
-		filepath.Join(final, "lib", "podman", "conmon"), config.PodmanTmpDir,
-		filepath.Join(final, "bin", "crun"), filepath.Join(final, "bin", "runc"), firewall)
+%s`, filepath.Join(dir, "etc", "seccomp.json"), jobLogSizeMax,
+		filepath.Join(dir, "lib", "podman"), filepath.Join(dir, "bin"),
+		filepath.Join(dir, "lib", "podman", "conmon"), config.PodmanTmpDir,
+		filepath.Join(dir, "bin", "crun"), filepath.Join(dir, "bin", "runc"), firewall)
 	if err := store.WriteFile(filepath.Join(etc, "containers.conf"), []byte(conf), 0o644); err != nil {
 		return err
 	}
@@ -173,7 +172,7 @@ network_backend = "netavark"
 		return err
 	}
 	env := fmt.Sprintf("CONTAINERS_CONF=%s\nCONTAINERS_REGISTRIES_CONF=%s\nPATH=%s:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n",
-		filepath.Join(final, "etc", "containers.conf"), filepath.Join(final, "etc", "registries.conf"), filepath.Join(final, "bin"))
+		filepath.Join(dir, "etc", "containers.conf"), filepath.Join(dir, "etc", "registries.conf"), filepath.Join(dir, "bin"))
 	return store.WriteFile(filepath.Join(dir, "env"), []byte(env), 0o644)
 }
 
