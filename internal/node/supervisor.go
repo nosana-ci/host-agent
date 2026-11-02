@@ -48,7 +48,6 @@ type Supervisor struct {
 	observed  bool
 	status    api.NodeStatus
 	image     string
-	restart   bool
 	start     bool // start an exited node at once, without the crash backoff
 	crashes   int
 	nextStart time.Time
@@ -57,12 +56,12 @@ type Supervisor struct {
 func New(pc *podman.Client, st *store.Store, network string) *Supervisor {
 	s := &Supervisor{pc: pc, st: st, network: network, wake: make(chan struct{}, 1)}
 	s.image = st.State().NodeImage
-	s.status = api.NodeStatus{Container: "unknown", Image: s.image, Desired: desired(st)}
+	s.status = api.NodeStatus{Container: "unknown", Image: s.image, Desired: desired(st.State())}
 	return s
 }
 
-func desired(st *store.Store) api.NodeStatusDesired {
-	if st.State().NodeStopped {
+func desired(state store.State) api.NodeStatusDesired {
+	if state.NodeStopped {
 		return api.Stopped
 	}
 	return api.Running
@@ -92,15 +91,21 @@ func (s *Supervisor) Start() error   { return s.want(false, false) }
 func (s *Supervisor) Stop() error    { return s.want(true, false) }
 func (s *Supervisor) Restart() error { return s.want(false, true) }
 
+// want records what the owner asked for. The restart is kept in the state so that a process
+// replaced before it happened does not lose it.
 func (s *Supervisor) want(stopped, restart bool) error {
-	if err := s.st.Update(func(state *store.State) { state.NodeStopped = stopped }); err != nil {
+	if err := s.st.Update(func(state *store.State) { state.NodeStopped, state.NodeRestart = stopped, restart }); err != nil {
 		return err
 	}
 	s.mu.Lock()
-	s.restart, s.start, s.crashes, s.nextStart = restart, !stopped, 0, time.Time{}
+	s.start, s.crashes, s.nextStart = !stopped, 0, time.Time{}
 	s.mu.Unlock()
 	s.poke()
 	return nil
+}
+
+func (s *Supervisor) restarted() {
+	_ = s.st.Update(func(state *store.State) { state.NodeRestart = false })
 }
 
 // SetImage changes the node image; the container is recreated once the node is idle.
@@ -149,10 +154,10 @@ func (s *Supervisor) setError(msg string) {
 func (s *Supervisor) reconcile(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute) // a first pull can be slow
 	defer cancel()
+	state := s.st.State()
 	s.mu.Lock()
-	image, restart := s.image, s.restart
-	s.status.Desired = desired(s.st)
-	stopped := s.status.Desired == api.Stopped
+	image := s.image
+	s.status.Desired = desired(state)
 	s.mu.Unlock()
 
 	if _, err := s.pc.Info(ctx); err != nil {
@@ -171,26 +176,23 @@ func (s *Supervisor) reconcile(ctx context.Context) error {
 	defer func() { s.observe(ctr, image) }()
 
 	switch {
-	case stopped:
+	case state.NodeStopped:
 		if ctr != nil && ctr.State.Running {
 			slog.Info("node: stopping")
 			return s.pc.StopContainer(ctx, ContainerName, stopTimeout)
 		}
 		return nil
 	case ctr == nil:
-		s.mu.Lock()
-		s.restart = false // creating is the restart
-		s.mu.Unlock()
+		if state.NodeRestart {
+			s.restarted() // creating is the restart
+		}
 		return s.create(ctx, image)
-
-	case restart:
+	case state.NodeRestart:
 		slog.Info("node: restarting")
 		if err := s.pc.StopContainer(ctx, ContainerName, stopTimeout); err != nil {
 			return err
 		}
-		s.mu.Lock()
-		s.restart = false // only once it happened; podman may have been away
-		s.mu.Unlock()
+		s.restarted() // only once it happened; podman may have been away
 		return s.pc.StartContainer(ctx, ContainerName)
 	case image != "" && (ctr.Config.Labels[LabelImage] != image || ctr.Config.Labels[labelNetwork] != s.network) && !s.Busy():
 		pulled, err := s.ensureImage(ctx, image) // the node keeps running during the pull

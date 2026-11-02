@@ -10,10 +10,12 @@ import (
 
 // State is what the agent remembers between runs, in agent/state.json.
 type State struct {
-	Claimed     bool   `json:"claimed"`
-	NodeStopped bool   `json:"nodeStopped"`
-	NodeImage   string `json:"nodeImage,omitempty"` // from the release manifest
-	Update      Update `json:"update"`
+	Claimed     bool `json:"claimed"`
+	NodeStopped bool `json:"nodeStopped"`
+	NodeRestart bool `json:"nodeRestart,omitempty"` // asked for, not done yet
+
+	NodeImage string `json:"nodeImage,omitempty"` // from the release manifest
+	Update    Update `json:"update"`
 }
 
 // Update is the self-update bookkeeping: the version that must still prove itself, the ones
