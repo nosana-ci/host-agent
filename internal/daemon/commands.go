@@ -63,6 +63,7 @@ func (d *daemon) runCommands(ctx context.Context, cmds []api.AgentCommand) {
 		if err := d.ctrl.Report(ctx, c.Id, result); err != nil {
 			slog.Warn("report command result", "id", c.Id, "err", err)
 		}
+		d.upd.Exec() // an update command switches binaries only after its result is in
 	}
 }
 

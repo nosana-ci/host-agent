@@ -96,8 +96,8 @@ func (d *daemon) doctorLoop(ctx context.Context) {
 }
 
 func (d *daemon) runDoctor(ctx context.Context) []api.Check {
-	g := gpu.Detect(ctx)
-	checks := doctor.Run(ctx, d.cfg.ControlURL, d.pc, g)
+	g, gpuErr := gpu.Detect(ctx)
+	checks := doctor.Run(ctx, d.cfg.ControlURL, d.pc, g, gpuErr)
 	d.mu.Lock()
 	d.gpu, d.checks = g, checks
 	d.mu.Unlock()
@@ -150,8 +150,8 @@ func (d *daemon) claim(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("claim: %w", err)
 	}
-	_ = os.Remove(config.ClaimTokenPath)
 	_ = d.st.Update(func(s *store.State) { s.Claimed = true })
+	_ = os.Remove(config.ClaimTokenPath)
 	slog.Info("linked to the account")
 	return nil
 }
@@ -173,7 +173,7 @@ func (d *daemon) heartbeat(ctx context.Context) error {
 func (d *daemon) commandLoop(ctx context.Context) {
 	for ctx.Err() == nil {
 		if !d.st.State().Claimed {
-			time.Sleep(heartbeatEvery)
+			sleep(ctx, heartbeatEvery)
 			continue
 		}
 		cmds, err := d.ctrl.WaitCommands(ctx)
@@ -181,10 +181,17 @@ func (d *daemon) commandLoop(ctx context.Context) {
 			if ctx.Err() == nil && !errors.Is(err, control.ErrUnknownHost) {
 				slog.Warn("command poll", "err", err)
 			}
-			time.Sleep(heartbeatEvery)
+			sleep(ctx, heartbeatEvery)
 			continue
 		}
 		d.runCommands(ctx, cmds)
+	}
+}
+
+func sleep(ctx context.Context, d time.Duration) {
+	select {
+	case <-ctx.Done():
+	case <-time.After(d):
 	}
 }
 

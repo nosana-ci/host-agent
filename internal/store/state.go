@@ -3,6 +3,7 @@ package store
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"os"
 	"sync"
 )
@@ -56,7 +57,13 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return s, json.Unmarshal(raw, &s.state)
+	if err := json.Unmarshal(raw, &s.state); err != nil {
+		// Starting over beats a restart loop in which Preflight never runs.
+		_ = os.Rename(path, path+".corrupt")
+		s.state = State{}
+		slog.Warn("state file unreadable; starting over", "err", err, "kept", path+".corrupt")
+	}
+	return s, nil
 }
 
 func (s *Store) State() State {

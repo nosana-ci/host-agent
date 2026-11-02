@@ -116,7 +116,6 @@ func (c *Client) Pull(ctx context.Context, ref string) (string, error) {
 }
 
 type Container struct {
-	Image string `json:"Image"` // image ID
 	State struct {
 		Status    string    `json:"Status"`
 		Running   bool      `json:"Running"`
@@ -220,6 +219,9 @@ func (c *Client) call(ctx context.Context, method, path string, query url.Values
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
 		return ErrNotFound
+	}
+	if resp.StatusCode == http.StatusNotModified { // already stopped or already running
+		return nil
 	}
 	if resp.StatusCode >= 300 {
 		return apiError(resp)

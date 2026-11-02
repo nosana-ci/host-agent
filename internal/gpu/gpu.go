@@ -2,7 +2,10 @@
 package gpu
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -11,17 +14,23 @@ import (
 	"github.com/nosana-ci/host-agent/internal/api"
 )
 
-func Detect(ctx context.Context) api.GpuStatus {
+// Detect lists the GPUs. The error is set when nvidia-smi exists but fails (a driver that did
+// not load, a library mismatch after an upgrade): that is not "no GPU".
+func Detect(ctx context.Context) (api.GpuStatus, error) {
 	st := api.GpuStatus{Gpus: []api.Gpu{}}
 	smi, err := exec.LookPath("nvidia-smi")
 	if err != nil {
-		return st
+		return st, nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, smi, "--query-gpu=index,name,memory.total,driver_version,uuid", "--format=csv,noheader,nounits").Output()
 	if err != nil {
-		return st
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && len(bytes.TrimSpace(exit.Stderr)) > 0 {
+			return st, fmt.Errorf("nvidia-smi: %s", bytes.TrimSpace(exit.Stderr))
+		}
+		return st, fmt.Errorf("nvidia-smi: %w", err)
 	}
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		f := strings.Split(line, ",")
@@ -35,5 +44,5 @@ func Detect(ctx context.Context) api.GpuStatus {
 		st.Driver = &driver
 	}
 	st.Detected = len(st.Gpus) > 0
-	return st
+	return st, nil
 }

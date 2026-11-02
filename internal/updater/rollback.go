@@ -20,7 +20,11 @@ const maxStarts = 3
 // rolls back once it has failed too often. It may exec the previous binary and not return.
 func Preflight(st *store.Store) {
 	p := st.State().Update.Pending
-	if p == nil || p.Version != version.Version {
+	if p == nil {
+		return
+	}
+	if p.Version != version.Version { // left behind by a rollback whose bookkeeping failed
+		_ = st.Update(func(s *store.State) { s.Update.Pending = nil })
 		return
 	}
 	if p.Attempts+1 > maxStarts {
@@ -67,3 +71,8 @@ func pruneBinaries(previous string) {
 }
 
 func binVersion(path string) string { return strings.TrimPrefix(filepath.Base(path), "nosana-host-") }
+
+func mustReadlink(link string) string {
+	target, _ := filepath.EvalSymlinks(link)
+	return target
+}

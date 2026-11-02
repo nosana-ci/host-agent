@@ -27,8 +27,8 @@ const MinDriver = 550
 
 var netClient = &http.Client{Timeout: 5 * time.Second}
 
-// Run executes every check. g is the GPU detection result.
-func Run(ctx context.Context, controlURL string, pc *podman.Client, g api.GpuStatus) []api.Check {
+// Run executes every check. g is the GPU detection result, gpuErr why it failed if it did.
+func Run(ctx context.Context, controlURL string, pc *podman.Client, g api.GpuStatus, gpuErr error) []api.Check {
 	checks := []api.Check{
 		checkOS(),
 		checkCgroup(),
@@ -39,7 +39,7 @@ func Run(ctx context.Context, controlURL string, pc *podman.Client, g api.GpuSta
 		// The registry answers 401 to anonymous clients, which is what a working one does.
 		checkReach(ctx, "registry", "Container registry reachable", "https://registry-1.docker.io/v2/", http.StatusUnauthorized),
 	}
-	checks = append(checks, gpuChecks(g)...)
+	checks = append(checks, gpuChecks(g, gpuErr)...)
 	for i := range checks {
 		if _, ok := fixes[checks[i].Id]; ok && checks[i].Status != api.Ok {
 			fixable := true
@@ -206,7 +206,10 @@ func checkReach(ctx context.Context, id, title, url string, expect int) api.Chec
 
 var cdiSpecs = []string{"/etc/cdi/nvidia.yaml", "/var/run/cdi/nvidia.yaml", "/etc/cdi/nvidia.json"}
 
-func gpuChecks(g api.GpuStatus) []api.Check {
+func gpuChecks(g api.GpuStatus, gpuErr error) []api.Check {
+	if gpuErr != nil {
+		return []api.Check{withFix(check("gpu", "NVIDIA GPU", api.Fail, gpuErr.Error()), "The driver did not answer. Reboot after a driver update, or reinstall the NVIDIA driver.")}
+	}
 	if !g.Detected {
 		return []api.Check{withFix(check("gpu", "NVIDIA GPU", api.Warn, "no GPU detected"), "The node runs, but it will not pass benchmarks or join a market without an NVIDIA GPU.")}
 	}

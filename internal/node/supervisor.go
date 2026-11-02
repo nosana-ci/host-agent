@@ -26,7 +26,6 @@ const (
 	ContainerName = "nosana-node"
 	NetworkName   = "NOSANA_GATEWAY"
 	subnet        = "192.168.101.0/24"
-	gateway       = "192.168.101.1"
 	apiPort       = 15001 // the node's port 5001, published on localhost
 	labelImage    = "io.nosana.host.image"
 	logSizeMax    = 10 << 20
@@ -95,8 +94,11 @@ func (s *Supervisor) want(stopped, restart bool) error {
 
 // SetImage changes the node image; the container is recreated once the node is idle.
 func (s *Supervisor) SetImage(image string) {
+	if image == "" {
+		return
+	}
 	s.mu.Lock()
-	changed := image != "" && image != s.image
+	changed := image != s.image
 	s.image = image
 	s.mu.Unlock()
 	if changed {
@@ -139,10 +141,9 @@ func (s *Supervisor) reconcile(ctx context.Context) error {
 	defer cancel()
 	s.mu.Lock()
 	image, restart := s.image, s.restart
-	s.restart = false
 	s.status.Desired = desired(s.st)
-	s.mu.Unlock()
 	stopped := s.status.Desired == api.Stopped
+	s.mu.Unlock()
 
 	if _, err := s.pc.Info(ctx); err != nil {
 		s.observe(nil, "")
@@ -173,8 +174,11 @@ func (s *Supervisor) reconcile(ctx context.Context) error {
 		if err := s.pc.StopContainer(ctx, ContainerName, stopTimeout); err != nil {
 			return err
 		}
+		s.mu.Lock()
+		s.restart = false // only once it happened; podman may have been away
+		s.mu.Unlock()
 		return s.pc.StartContainer(ctx, ContainerName)
-	case ctr.Config.Labels[labelImage] != image && !s.Busy():
+	case image != "" && ctr.Config.Labels[labelImage] != image && !s.Busy():
 		slog.Info("node: switching image", "image", image)
 		if err := s.pc.RemoveContainer(ctx, ContainerName); err != nil {
 			return err

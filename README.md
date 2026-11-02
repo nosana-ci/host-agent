@@ -29,7 +29,7 @@ newer), nvidia-container-toolkit and a CDI spec for the GPU; the console's healt
 what is missing.
 
 ```sh
-nosana-host status                 # node address, link, node container
+sudo nosana-host status            # node address, link, node container
 journalctl -u nosana-host -f       # the agent's log
 sudo nosana-host uninstall [--purge]   # --purge deletes state too, after backing up the wallet into your home
 ```

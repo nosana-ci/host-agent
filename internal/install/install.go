@@ -42,6 +42,7 @@ func Run(ctx context.Context, o Options, out io.Writer) error {
 	cfg, err := config.Load()
 	if err == nil {
 		say("found an existing install, repairing it")
+		_ = service.Systemctl("stop", service.AgentUnit) // it would overwrite the state we change
 	}
 	if o.ControlURL != "" {
 		cfg.ControlURL = o.ControlURL
@@ -152,7 +153,9 @@ func Uninstall(ctx context.Context, purge bool, out io.Writer) error {
 	if err := pc.StopContainer(ctx, node.ContainerName, 2*time.Minute); err == nil {
 		fmt.Fprintln(out, "• node container stopped")
 	}
-	_ = pc.RemoveContainer(ctx, node.ContainerName)
+	if err := pc.RemoveContainer(ctx, node.ContainerName); err != nil {
+		fmt.Fprintf(out, "• warning: the node container was not removed (%v); remove it with podman\n", err)
+	}
 	_ = service.Systemctl("disable", "--now", service.PodmanUnit, service.AgentUnit)
 	_ = os.Remove(filepath.Join(service.UnitDir, service.AgentUnit))
 	_ = os.Remove(filepath.Join(service.UnitDir, service.PodmanUnit))

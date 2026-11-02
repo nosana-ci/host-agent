@@ -29,7 +29,7 @@ const usage = `nosana-host runs the Nosana node on this machine and reports to h
 Usage:
   nosana-host install --control-url URL --release-url URL --network mainnet|devnet [--token T]   install or repair (sudo)
   nosana-host uninstall [--purge]       remove the services; --purge also deletes state after backing the wallet up
-  nosana-host status                    what the agent knows: node address, link, node container
+  nosana-host status                    what the agent knows: node address, link, node container (sudo)
   nosana-host daemon                    run the agent (what the service runs)
   nosana-host version
 `
@@ -78,9 +78,15 @@ func cmdInstall(args []string) error {
 }
 
 func cmdStatus() error {
+	if os.Geteuid() != 0 {
+		return errors.New("run with sudo")
+	}
 	cfg, err := config.Load()
 	if err != nil {
 		return errors.New("nosana-host is not installed")
+	}
+	if _, err := os.Stat(config.WalletPath); err != nil {
+		return errors.New("no node wallet yet; the install did not finish")
 	}
 	st, err := store.Open(config.StatePath)
 	if err != nil {

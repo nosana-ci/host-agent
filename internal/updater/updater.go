@@ -39,8 +39,10 @@ type Updater struct {
 	pc   *podman.Client
 	wake chan struct{}
 
+	apply  sync.Mutex // one Check applies at a time: Run and the commands may call it together
 	mu     sync.Mutex
 	status api.UpdateStatus
+	ready  bool // a new agent is linked in and waits for Exec
 }
 
 func New(cfg config.Config, st *store.Store, sup *node.Supervisor, pc *podman.Client) *Updater {
@@ -77,8 +79,16 @@ func (u *Updater) Run(ctx context.Context) {
 		if _, err := u.Check(ctx, false); err != nil && ctx.Err() == nil {
 			slog.Warn("update check", "err", err)
 		}
+		u.Exec()
 		select {
 		case <-ctx.Done():
+			if keep != nil { // a clean stop is not a failed start
+				_ = u.st.Update(func(s *store.State) {
+					if p := s.Update.Pending; p != nil && p.Attempts > 0 {
+						p.Attempts--
+					}
+				})
+			}
 			return
 		case <-keep:
 			keep = nil
@@ -92,6 +102,10 @@ func (u *Updater) Run(ctx context.Context) {
 // Check reads the manifest and applies it: the node image right away, the runtime bundle and the
 // agent when the node is idle or force is set. It returns what it did, in a sentence.
 func (u *Updater) Check(ctx context.Context, force bool) (string, error) {
+	if !u.apply.TryLock() {
+		return "an update is already running", nil
+	}
+	defer u.apply.Unlock()
 	if p := u.st.State().Update.Pending; p != nil {
 		return "version " + p.Version + " is still proving itself", nil
 	}
@@ -107,7 +121,8 @@ func (u *Updater) Check(ctx context.Context, force bool) (string, error) {
 	u.sup.SetImage(m.Node.Image)
 
 	busy := u.sup.Busy() && !force
-	if cur := runtime.Current(); m.Runtime.Version != cur && !slices.Contains(u.st.State().Update.BlockedRuntime, m.Runtime.Version) {
+	// The runtime only moves up: a halted release must not downgrade podman under its database.
+	if cur := runtime.Current(); version.Compare(m.Runtime.Version, cur) > 0 && !slices.Contains(u.st.State().Update.BlockedRuntime, m.Runtime.Version) {
 		if busy {
 			u.set("deferred", "runtime "+m.Runtime.Version+" waits until the node is idle")
 			return "runtime update to " + m.Runtime.Version + " deferred: the node is busy", nil
@@ -134,7 +149,19 @@ func (u *Updater) Check(ctx context.Context, force bool) (string, error) {
 		u.set("error", err.Error())
 		return "", err
 	}
-	return "switching to agent " + m.Version, nil // not reached: installAgent execs
+	return "switching to agent " + m.Version, nil
+}
+
+// Exec switches to the agent installAgent linked in, once the caller has reported the result.
+// It does not return then; the node keeps running.
+func (u *Updater) Exec() {
+	u.mu.Lock()
+	ready := u.ready
+	u.mu.Unlock()
+	if ready {
+		slog.Info("switching to agent", "to", binVersion(mustReadlink(config.CurrentBinary)))
+		execSelf()
+	}
 }
 
 // Poke makes Run check now.
@@ -173,8 +200,9 @@ func (u *Updater) installAgent(ctx context.Context, m *manifest.Manifest) error 
 		_ = u.st.Update(func(s *store.State) { s.Update.Pending = nil })
 		return err
 	}
-	slog.Info("switching to agent", "version", m.Version)
-	execSelf()
+	u.mu.Lock()
+	u.ready = true
+	u.mu.Unlock()
 	return nil
 }
 
@@ -223,7 +251,11 @@ func (u *Updater) activate(ctx context.Context, ver string) error {
 		if _, err := u.pc.Info(ctx); err == nil {
 			return nil
 		}
-		time.Sleep(2 * time.Second)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
 	}
 	return errors.New("podman did not answer within " + runtimeStartup.String())
 }
