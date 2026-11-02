@@ -44,11 +44,11 @@ type Updater struct {
 	apply  sync.Mutex // one Check applies at a time: Run and the commands may call it together
 	mu     sync.Mutex
 	status api.UpdateStatus
-	ready  chan string // the agent version installAgent linked in
+	ready  chan struct{} // installAgent linked a new agent in
 }
 
 func New(cfg config.Config, st *store.Store, sup *node.Supervisor, pc *podman.Client) *Updater {
-	u := &Updater{cfg: cfg, st: st, sup: sup, pc: pc, ready: make(chan string, 1), status: api.UpdateStatus{State: "idle"}}
+	u := &Updater{cfg: cfg, st: st, sup: sup, pc: pc, ready: make(chan struct{}, 1), status: api.UpdateStatus{State: "idle"}}
 	if p := st.State().Update.Pending; p != nil && p.Version == version.Version {
 		u.proving = true
 		u.set("pending", "version "+p.Version+" is kept after "+keepAfter.String()+" up")
@@ -162,9 +162,9 @@ func (u *Updater) fail(err error) (string, error) {
 	return "", err
 }
 
-// Ready announces the agent version installAgent linked in. The caller switches to it with Exec
-// once every command it took is answered.
-func (u *Updater) Ready() <-chan string { return u.ready }
+// Ready fires once installAgent linked a new agent in. The caller switches to it with Exec once
+// every command it took is answered.
+func (u *Updater) Ready() <-chan struct{} { return u.ready }
 
 func (u *Updater) installAgent(ctx context.Context, m *manifest.Manifest) error {
 	art := m.Agent.Artifacts.LinuxAmd64
@@ -197,8 +197,10 @@ func (u *Updater) installAgent(ctx context.Context, m *manifest.Manifest) error 
 		_ = u.st.Update(func(s *store.State) { s.Update.Pending = nil })
 		return err
 	}
-	u.ready <- m.Version
+	slog.Info("switching to agent once the commands are answered", "to", m.Version)
+	u.ready <- struct{}{}
 	return nil
+
 }
 
 // commit keeps the running version: it stayed up long enough.

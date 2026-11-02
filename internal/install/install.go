@@ -4,6 +4,7 @@ package install
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -130,9 +131,11 @@ func Run(ctx context.Context, o Options, out io.Writer) (err error) {
 		say("claim token saved; the agent links this host to your account on start")
 	}
 
-	if err := cfg.Save(); err != nil {
+	raw, _ := json.MarshalIndent(cfg, "", "  ")
+	if err := store.WriteFile(config.Path, append(raw, '\n'), 0o644); err != nil {
 		return err
 	}
+
 	changed, err := service.WriteUnits()
 	if err != nil {
 		return err

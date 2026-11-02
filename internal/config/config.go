@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-
-	"github.com/nosana-ci/host-agent/internal/store"
 )
 
 const (
@@ -29,11 +27,6 @@ func Load() (Config, error) {
 		return c, err
 	}
 	return c, json.Unmarshal(raw, &c)
-}
-
-func (c Config) Save() error {
-	raw, _ := json.MarshalIndent(c, "", "  ")
-	return store.WriteFile(Path, append(raw, '\n'), 0o644)
 }
 
 var (

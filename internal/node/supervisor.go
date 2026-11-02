@@ -24,7 +24,7 @@ import (
 
 const (
 	ContainerName = "nosana-node"
-	NetworkName   = "NOSANA_GATEWAY"
+	networkName   = "NOSANA_GATEWAY"
 	subnet        = "192.168.101.0/24"
 	apiPort       = 15001 // the node's port 5001, published on localhost
 	LabelImage    = "io.nosana.host.image"
@@ -266,7 +266,7 @@ func (s *Supervisor) create(ctx context.Context, image string) error {
 			{Source: config.NodeDir, Destination: "/root/.nosana"},
 			{Source: config.PodmanSocketDir, Destination: "/root/.nosana/podman"},
 		},
-		Network:    NetworkName,
+		Network:    networkName,
 		Ports:      []podman.Port{{HostIP: "127.0.0.1", HostPort: apiPort, ContainerPort: 5001, Protocol: "tcp"}},
 		LogSizeMax: logSizeMax,
 	}
@@ -290,7 +290,7 @@ func (s *Supervisor) ensureImage(ctx context.Context, image string) (bool, error
 // ensureNetwork creates the node network. The node only looks it up by name, so when the usual
 // subnet is taken on this host (another container engine, a VPN) the next /24 is used.
 func (s *Supervisor) ensureNetwork(ctx context.Context) error {
-	ok, err := s.pc.NetworkExists(ctx, NetworkName)
+	ok, err := s.pc.NetworkExists(ctx, networkName)
 	if err != nil || ok {
 		return err
 	}
@@ -298,17 +298,17 @@ func (s *Supervisor) ensureNetwork(ctx context.Context) error {
 	for range 30 {
 		gw := slices.Clone(ipnet.IP.To4())
 		gw[3] = 1
-		err = s.pc.CreateNetwork(ctx, NetworkName, ipnet.String(), gw.String())
+		err = s.pc.CreateNetwork(ctx, networkName, ipnet.String(), gw.String())
 		if !errors.Is(err, podman.ErrSubnetInUse) {
 			if err == nil {
-				slog.Info("node: created network", "network", NetworkName, "subnet", ipnet.String())
+				slog.Info("node: created network", "network", networkName, "subnet", ipnet.String())
 			}
 			return err
 		}
 		ipnet.IP = slices.Clone(ipnet.IP.To4())
 		ipnet.IP[2]++
 	}
-	return fmt.Errorf("no free subnet for %s: %w", NetworkName, err)
+	return fmt.Errorf("no free subnet for %s: %w", networkName, err)
 }
 
 // observe refreshes the status from the container and the node's own API.

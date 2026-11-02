@@ -199,17 +199,17 @@ func (d *daemon) queue(ctx context.Context, cmds []api.AgentCommand) {
 // commandLoop runs the queued commands one at a time, and switches to a new agent only when no
 // command is waiting: every command it took is answered before the process is replaced.
 func (d *daemon) commandLoop(ctx context.Context) {
-	var switchTo string
+	switching := false
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case cmds := <-d.cmds:
 			d.runCommands(ctx, cmds)
-		case switchTo = <-d.upd.Ready():
+		case <-d.upd.Ready():
+			switching = true
 		}
-		if switchTo != "" && len(d.cmds) == 0 {
-			slog.Info("switching to agent", "to", switchTo)
+		if switching && len(d.cmds) == 0 {
 			updater.Exec()
 		}
 

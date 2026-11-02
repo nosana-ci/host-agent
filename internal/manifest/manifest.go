@@ -66,11 +66,11 @@ func Fetch(ctx context.Context, releaseURL string) (*Manifest, error) {
 	if err != nil {
 		return nil, err
 	}
-	return Verify(raw, strings.TrimSpace(string(sig)), pub)
+	return verify(raw, strings.TrimSpace(string(sig)), pub)
 }
 
-// Verify checks the base64 signature over the manifest text and parses it.
-func Verify(raw []byte, signature string, pub ed25519.PublicKey) (*Manifest, error) {
+// verify checks the base64 signature over the manifest text and parses it.
+func verify(raw []byte, signature string, pub ed25519.PublicKey) (*Manifest, error) {
 	sig, err := base64.StdEncoding.DecodeString(signature)
 	if err != nil || !ed25519.Verify(pub, raw, sig) {
 		return nil, errors.New("release manifest signature does not match the release key")
