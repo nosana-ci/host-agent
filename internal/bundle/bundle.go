@@ -26,10 +26,13 @@ import (
 // Platform is this machine's key in a manifest's artifacts.
 const Platform = "linux-amd64"
 
-// Current is the active bundle version, or "".
+// Current is the active bundle version, or "" when there is none or current points at nothing.
 func Current() string {
 	target, err := os.Readlink(config.RuntimeCurrent)
 	if err != nil {
+		return ""
+	}
+	if _, err := os.Stat(config.RuntimePodman); err != nil {
 		return ""
 	}
 	return filepath.Base(target)
