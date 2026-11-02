@@ -1,5 +1,5 @@
 // Package doctor runs the host checks the console shows, and the three fixes the agent can apply
-// itself. It also reads the disk the state directory lives on.
+// itself. It also detects the GPUs and reads the disk the state directory lives on.
 package doctor
 
 import (
@@ -26,8 +26,9 @@ const minDriver = 550
 
 var netClient = &http.Client{Timeout: 5 * time.Second}
 
-// Run executes every check. g is the GPU detection result, gpuErr why it failed if it did.
-func Run(ctx context.Context, controlURL string, pc *podman.Client, g api.GpuStatus, gpuErr error) []api.Check {
+// Run detects the GPUs and executes every check.
+func Run(ctx context.Context, controlURL string, pc *podman.Client) (api.GpuStatus, []api.Check) {
+	g, gpuErr := detectGPUs(ctx)
 	checks := []api.Check{
 		checkOS(),
 		checkCgroup(),
@@ -45,7 +46,7 @@ func Run(ctx context.Context, controlURL string, pc *podman.Client, g api.GpuSta
 			checks[i].Fixable = &fixable
 		}
 	}
-	return checks
+	return g, checks
 }
 
 var fixes = map[string]func(ctx context.Context) error{

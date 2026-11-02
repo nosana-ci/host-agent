@@ -1,5 +1,4 @@
-// Package gpu detects NVIDIA GPUs through nvidia-smi.
-package gpu
+package doctor
 
 import (
 	"bytes"
@@ -14,9 +13,9 @@ import (
 	"github.com/nosana-ci/host-agent/internal/api"
 )
 
-// Detect lists the GPUs. The error is set when nvidia-smi exists but fails (a driver that did
-// not load, a library mismatch after an upgrade): that is not "no GPU".
-func Detect(ctx context.Context) (api.GpuStatus, error) {
+// detectGPUs lists the GPUs through nvidia-smi. The error is set when nvidia-smi exists but fails
+// (a driver that did not load, a library mismatch after an upgrade): that is not "no GPU".
+func detectGPUs(ctx context.Context) (api.GpuStatus, error) {
 	st := api.GpuStatus{Gpus: []api.Gpu{}}
 	smi, err := exec.LookPath("nvidia-smi")
 	if err != nil {

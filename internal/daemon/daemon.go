@@ -17,7 +17,6 @@ import (
 	"github.com/nosana-ci/host-agent/internal/config"
 	"github.com/nosana-ci/host-agent/internal/control"
 	"github.com/nosana-ci/host-agent/internal/doctor"
-	"github.com/nosana-ci/host-agent/internal/gpu"
 	"github.com/nosana-ci/host-agent/internal/keys"
 	"github.com/nosana-ci/host-agent/internal/node"
 	"github.com/nosana-ci/host-agent/internal/podman"
@@ -96,8 +95,7 @@ func (d *daemon) doctorLoop(ctx context.Context) {
 }
 
 func (d *daemon) runDoctor(ctx context.Context) []api.Check {
-	g, gpuErr := gpu.Detect(ctx)
-	checks := doctor.Run(ctx, d.cfg.ControlURL, d.pc, g, gpuErr)
+	g, checks := doctor.Run(ctx, d.cfg.ControlURL, d.pc)
 	d.mu.Lock()
 	d.gpu, d.checks = g, checks
 	d.mu.Unlock()

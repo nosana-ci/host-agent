@@ -75,7 +75,7 @@ dependency).
 Layout: `cmd/nosana-host` (CLI), `cmd/nosana-host-publish` (release tool), `internal/manifest` (the release manifest), `internal/daemon`
 (wiring and the command table), `node` (supervisor), `control` (host-manager client and request
 signing), `updater` (self-update, rollback, runtime switch), `bundle` (the podman bundle),
-`doctor` (checks and fixes), `gpu`, `install`, `service` (systemd units), `store` (atomic files,
+`doctor` (checks, fixes, GPU detection), `install`, `service` (systemd units), `store` (atomic files,
 state), `keys`, `config`.
 
 ## Releases
