@@ -75,13 +75,15 @@ func (s *Supervisor) Status() api.NodeStatus {
 }
 
 // Busy reports whether the node may run a job or a benchmark, which updates must not interrupt.
-// A node that was not observed yet, or runs without answering /node/info, counts as busy.
+// A node that was not observed yet, that podman cannot report on, or that runs without answering
+// /node/info counts as busy.
 func (s *Supervisor) Busy() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !s.observed {
+	if !s.observed || s.status.Container == "unknown" {
 		return true
 	}
+
 	st := s.status
 	return st.Container == "running" && (st.State == nil || *st.State == "RUNNING_JOB" || *st.State == "BENCHMARKING")
 }
