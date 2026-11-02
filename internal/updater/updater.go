@@ -25,6 +25,8 @@ import (
 
 const (
 	checkEvery = 10 * time.Minute
+	// firstCheck gives the supervisor time to see the node first; until then it counts as busy.
+	firstCheck = 30 * time.Second
 	// keepAfter is how long a new version must stay up before it is kept; Preflight rolls back
 	// a version that fails to start three times before that.
 	keepAfter      = 2 * time.Minute
@@ -73,10 +75,8 @@ func (u *Updater) Run(ctx context.Context) {
 	if p := u.st.State().Update.Pending; p != nil && p.Version == version.Version {
 		keep = time.After(keepAfter)
 	}
+	next := time.After(firstCheck)
 	for {
-		if _, err := u.Check(ctx, false); err != nil && ctx.Err() == nil {
-			slog.Warn("update check", "err", err)
-		}
 		select {
 		case <-ctx.Done():
 			if keep != nil { // a clean stop is not a failed start
@@ -90,7 +90,11 @@ func (u *Updater) Run(ctx context.Context) {
 		case <-keep:
 			keep = nil
 			u.commit()
-		case <-time.After(checkEvery):
+		case <-next:
+			if _, err := u.Check(ctx, false); err != nil && ctx.Err() == nil {
+				slog.Warn("update check", "err", err)
+			}
+			next = time.After(checkEvery)
 		}
 	}
 }
