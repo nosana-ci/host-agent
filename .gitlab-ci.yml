@@ -1,6 +1,6 @@
 # Tests on every change. A tag v<version> builds linux-amd64 and the runtime bundle, writes the
 # signed manifest (stable.json, stable.json.sig) and publishes all four files as a GitHub Release
-# on the open-source mirror, github.com/nosana-ci/nosana-host. Agents and install.sh read
+# on the open-source mirror, github.com/nosana-ci/host-agent. Agents and install.sh read
 # .../releases/latest/download/stable.json, so the newest full release is "stable". To halt a
 # release, mark it as a pre-release on GitHub: "latest" then points at the previous one, and agents
 # never install a version lower than their own.
@@ -15,7 +15,7 @@ stages: [test, release]
 
 variables:
   RUNTIME_VERSION: "5.8.8"
-  GITHUB_REPO: nosana-ci/nosana-host
+  GITHUB_REPO: nosana-ci/host-agent
 
 test:
   stage: test

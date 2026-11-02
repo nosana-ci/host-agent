@@ -8,9 +8,9 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/nosana-ci/nosana-host/internal/config"
-	"github.com/nosana-ci/nosana-host/internal/store"
-	"github.com/nosana-ci/nosana-host/internal/version"
+	"github.com/nosana-ci/host-agent/internal/config"
+	"github.com/nosana-ci/host-agent/internal/store"
+	"github.com/nosana-ci/host-agent/internal/version"
 )
 
 // maxStarts is how often a pending version may start without staying up before it is rolled back.

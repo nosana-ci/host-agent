@@ -15,15 +15,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nosana-ci/nosana-host/internal/config"
-	"github.com/nosana-ci/nosana-host/internal/keys"
-	"github.com/nosana-ci/nosana-host/internal/manifest"
-	"github.com/nosana-ci/nosana-host/internal/node"
-	"github.com/nosana-ci/nosana-host/internal/podman"
-	"github.com/nosana-ci/nosana-host/internal/runtime"
-	"github.com/nosana-ci/nosana-host/internal/service"
-	"github.com/nosana-ci/nosana-host/internal/store"
-	"github.com/nosana-ci/nosana-host/internal/version"
+	"github.com/nosana-ci/host-agent/internal/config"
+	"github.com/nosana-ci/host-agent/internal/keys"
+	"github.com/nosana-ci/host-agent/internal/manifest"
+	"github.com/nosana-ci/host-agent/internal/node"
+	"github.com/nosana-ci/host-agent/internal/podman"
+	"github.com/nosana-ci/host-agent/internal/runtime"
+	"github.com/nosana-ci/host-agent/internal/service"
+	"github.com/nosana-ci/host-agent/internal/store"
+	"github.com/nosana-ci/host-agent/internal/version"
 )
 
 type Options struct {

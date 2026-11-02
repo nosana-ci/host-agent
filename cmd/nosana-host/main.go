@@ -14,14 +14,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/nosana-ci/nosana-host/internal/config"
-	"github.com/nosana-ci/nosana-host/internal/daemon"
-	"github.com/nosana-ci/nosana-host/internal/install"
-	"github.com/nosana-ci/nosana-host/internal/keys"
-	"github.com/nosana-ci/nosana-host/internal/node"
-	"github.com/nosana-ci/nosana-host/internal/podman"
-	"github.com/nosana-ci/nosana-host/internal/store"
-	"github.com/nosana-ci/nosana-host/internal/version"
+	"github.com/nosana-ci/host-agent/internal/config"
+	"github.com/nosana-ci/host-agent/internal/daemon"
+	"github.com/nosana-ci/host-agent/internal/install"
+	"github.com/nosana-ci/host-agent/internal/keys"
+	"github.com/nosana-ci/host-agent/internal/node"
+	"github.com/nosana-ci/host-agent/internal/podman"
+	"github.com/nosana-ci/host-agent/internal/store"
+	"github.com/nosana-ci/host-agent/internal/version"
 )
 
 const usage = `nosana-host runs the Nosana node on this machine and reports to host-manager.

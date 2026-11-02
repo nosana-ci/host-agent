@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/nosana-ci/nosana-host/internal/api"
-	"github.com/nosana-ci/nosana-host/internal/doctor"
+	"github.com/nosana-ci/host-agent/internal/api"
+	"github.com/nosana-ci/host-agent/internal/doctor"
 )
 
 // Every command the console can send, in the order the agent advertises them. A new verb is one

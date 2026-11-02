@@ -15,11 +15,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nosana-ci/nosana-host/internal/api"
-	"github.com/nosana-ci/nosana-host/internal/config"
-	"github.com/nosana-ci/nosana-host/internal/podman"
-	"github.com/nosana-ci/nosana-host/internal/store"
-	"github.com/nosana-ci/nosana-host/internal/version"
+	"github.com/nosana-ci/host-agent/internal/api"
+	"github.com/nosana-ci/host-agent/internal/config"
+	"github.com/nosana-ci/host-agent/internal/podman"
+	"github.com/nosana-ci/host-agent/internal/store"
+	"github.com/nosana-ci/host-agent/internal/version"
 )
 
 const (

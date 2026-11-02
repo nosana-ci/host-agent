@@ -1,4 +1,4 @@
-module github.com/nosana-ci/nosana-host
+module github.com/nosana-ci/host-agent
 
 go 1.27.2
 

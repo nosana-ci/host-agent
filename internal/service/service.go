@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/nosana-ci/nosana-host/internal/config"
-	"github.com/nosana-ci/nosana-host/internal/store"
+	"github.com/nosana-ci/host-agent/internal/config"
+	"github.com/nosana-ci/host-agent/internal/store"
 )
 
 const (

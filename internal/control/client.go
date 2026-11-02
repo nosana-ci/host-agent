@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nosana-ci/nosana-host/internal/api"
-	"github.com/nosana-ci/nosana-host/internal/keys"
+	"github.com/nosana-ci/host-agent/internal/api"
+	"github.com/nosana-ci/host-agent/internal/keys"
 )
 
 // ErrUnknownHost is host-manager's answer when the node is not linked to an account: the host was

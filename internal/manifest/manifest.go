@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nosana-ci/nosana-host/internal/version"
+	"github.com/nosana-ci/host-agent/internal/version"
 )
 
 type Artifact struct {

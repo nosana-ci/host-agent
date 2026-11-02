@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nosana-ci/nosana-host/internal/manifest"
+	"github.com/nosana-ci/host-agent/internal/manifest"
 )
 
 func main() {

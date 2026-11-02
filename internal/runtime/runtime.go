@@ -18,10 +18,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nosana-ci/nosana-host/internal/config"
-	"github.com/nosana-ci/nosana-host/internal/manifest"
-	"github.com/nosana-ci/nosana-host/internal/store"
-	"github.com/nosana-ci/nosana-host/internal/updater/download"
+	"github.com/nosana-ci/host-agent/internal/config"
+	"github.com/nosana-ci/host-agent/internal/manifest"
+	"github.com/nosana-ci/host-agent/internal/store"
+	"github.com/nosana-ci/host-agent/internal/updater/download"
 )
 
 // Platform is this machine's key in a manifest's artifacts.

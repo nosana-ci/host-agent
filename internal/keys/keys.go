@@ -11,7 +11,7 @@ import (
 	"math/big"
 	"os"
 
-	"github.com/nosana-ci/nosana-host/internal/store"
+	"github.com/nosana-ci/host-agent/internal/store"
 )
 
 // Wallet reads the node wallet at path (a Solana keypair file: 64 bytes as a JSON array),

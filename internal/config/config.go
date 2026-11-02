@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/nosana-ci/nosana-host/internal/store"
+	"github.com/nosana-ci/host-agent/internal/store"
 )
 
 const (

@@ -3,7 +3,7 @@ VERSION ?= 0.0.0-dev
 COMMIT   = $(shell git rev-parse --short HEAD 2>/dev/null)
 # The base64 ed25519 public key that signs releases; a build without it cannot install or update.
 RELEASE_PUBLIC_KEY ?=
-PKG     := github.com/nosana-ci/nosana-host/internal/version
+PKG     := github.com/nosana-ci/host-agent/internal/version
 LDFLAGS  = -s -w -X $(PKG).Version=$(VERSION) -X $(PKG).Commit=$(COMMIT) -X $(PKG).ReleasePublicKey=$(RELEASE_PUBLIC_KEY)
 RUNTIME ?= 5.8.8
 

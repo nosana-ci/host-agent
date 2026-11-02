@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nosana-ci/nosana-host/internal/api"
+	"github.com/nosana-ci/host-agent/internal/api"
 )
 
 func Detect(ctx context.Context) api.GpuStatus {

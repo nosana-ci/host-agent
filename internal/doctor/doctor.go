@@ -15,11 +15,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/nosana-ci/nosana-host/internal/api"
-	"github.com/nosana-ci/nosana-host/internal/config"
-	"github.com/nosana-ci/nosana-host/internal/podman"
-	bundle "github.com/nosana-ci/nosana-host/internal/runtime"
-	"github.com/nosana-ci/nosana-host/internal/service"
+	"github.com/nosana-ci/host-agent/internal/api"
+	"github.com/nosana-ci/host-agent/internal/config"
+	"github.com/nosana-ci/host-agent/internal/podman"
+	bundle "github.com/nosana-ci/host-agent/internal/runtime"
+	"github.com/nosana-ci/host-agent/internal/service"
 )
 
 // MinDriver is the oldest NVIDIA driver major version the node supports.

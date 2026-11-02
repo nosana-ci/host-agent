@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nosana-ci/nosana-host/internal/api"
-	"github.com/nosana-ci/nosana-host/internal/keys"
+	"github.com/nosana-ci/host-agent/internal/api"
+	"github.com/nosana-ci/host-agent/internal/keys"
 )
 
 // A test host-manager that checks the SDK authorization header the way the real one does.

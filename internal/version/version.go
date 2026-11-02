@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// Set with -ldflags "-X github.com/nosana-ci/nosana-host/internal/version.Version=1.2.3 ...".
+// Set with -ldflags "-X github.com/nosana-ci/host-agent/internal/version.Version=1.2.3 ...".
 var (
 	Version = "0.0.0-dev"
 	Commit  = ""

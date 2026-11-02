@@ -12,16 +12,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nosana-ci/nosana-host/internal/api"
-	"github.com/nosana-ci/nosana-host/internal/config"
-	"github.com/nosana-ci/nosana-host/internal/manifest"
-	"github.com/nosana-ci/nosana-host/internal/node"
-	"github.com/nosana-ci/nosana-host/internal/podman"
-	"github.com/nosana-ci/nosana-host/internal/runtime"
-	"github.com/nosana-ci/nosana-host/internal/service"
-	"github.com/nosana-ci/nosana-host/internal/store"
-	"github.com/nosana-ci/nosana-host/internal/updater/download"
-	"github.com/nosana-ci/nosana-host/internal/version"
+	"github.com/nosana-ci/host-agent/internal/api"
+	"github.com/nosana-ci/host-agent/internal/config"
+	"github.com/nosana-ci/host-agent/internal/manifest"
+	"github.com/nosana-ci/host-agent/internal/node"
+	"github.com/nosana-ci/host-agent/internal/podman"
+	"github.com/nosana-ci/host-agent/internal/runtime"
+	"github.com/nosana-ci/host-agent/internal/service"
+	"github.com/nosana-ci/host-agent/internal/store"
+	"github.com/nosana-ci/host-agent/internal/updater/download"
+	"github.com/nosana-ci/host-agent/internal/version"
 )
 
 const (
