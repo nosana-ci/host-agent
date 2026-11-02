@@ -19,7 +19,7 @@ reads the current release from host-manager, downloads the agent and checks its 
 1. puts the binary in `/var/lib/nosana/agent/bin/` and links `/usr/local/bin/nosana-host` to it;
 2. downloads the podman runtime bundle the release names into `/var/lib/nosana/runtime/<version>`
    (hosts never install podman; `nftables` is installed when the host has no firewall tool);
-3. creates the node wallet (`/var/lib/nosana/node/nosana_key.json`) and the device key;
+3. creates the node wallet (`/var/lib/nosana/node/nosana_key.json`);
 4. writes `/etc/nosana/host.json` (host-manager URL, network) and the two systemd units,
    `nosana-podman.service` and `nosana-host.service`, and starts them.
 
@@ -44,7 +44,8 @@ Install script: `host-console/public/install.sh`.
   (exit 129) or with a backoff when it crashes, keeps it stopped when the owner said so, and swaps
   the image when the release changes it and the node is idle.
 - **Heartbeat.** Every 15 s: agent version and the commands it accepts, update state, node state,
-  GPU, disk, the host checks and the runtime, signed with the device key. Commands come back in the
+  GPU, disk, the host checks and the runtime, signed with the node wallet like every node request.
+  Commands come back in the
   answer and through a 25 s long-poll; each is answered done or failed with a message.
 - **Commands.** `restart-node`, `stop-node`, `start-node`, `run-doctor`, `fix-check` (podman
   service restart, nftables install, nvidia-persistenced), `check-update`, `update` (also while the

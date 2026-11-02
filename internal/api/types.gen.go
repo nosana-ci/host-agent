@@ -72,10 +72,8 @@ type CheckStatus string
 
 // ClaimBody defines model for ClaimBody.
 type ClaimBody struct {
-	// DevicePublicKey Base64 ed25519 public key the agent signs with
-	DevicePublicKey string `json:"devicePublicKey"`
-	Hostname        string `json:"hostname"`
-	Token           string `json:"token"`
+	Hostname string `json:"hostname"`
+	Token    string `json:"token"`
 }
 
 // ClaimResult defines model for ClaimResult.
@@ -211,26 +209,12 @@ type PostAgentClaimParams struct {
 
 // GetAgentCommandsParams defines parameters for GetAgentCommands.
 type GetAgentCommandsParams struct {
-	// XNosanaNode The node address the device key belongs to
-	XNosanaNode string `json:"x-nosana-node"`
-
-	// XNosanaTimestamp Unix seconds when the request was signed
-	XNosanaTimestamp string `json:"x-nosana-timestamp"`
-
-	// XNosanaSignature Base64 ed25519 signature, see signedMessage
-	XNosanaSignature string `json:"x-nosana-signature"`
+	Authorization string `json:"authorization"`
 }
 
 // PostAgentCommandsByIdResultParams defines parameters for PostAgentCommandsByIdResult.
 type PostAgentCommandsByIdResultParams struct {
-	// XNosanaNode The node address the device key belongs to
-	XNosanaNode string `json:"x-nosana-node"`
-
-	// XNosanaTimestamp Unix seconds when the request was signed
-	XNosanaTimestamp string `json:"x-nosana-timestamp"`
-
-	// XNosanaSignature Base64 ed25519 signature, see signedMessage
-	XNosanaSignature string `json:"x-nosana-signature"`
+	Authorization string `json:"authorization"`
 }
 
 // PostAgentCommandsByIdResultParamsId0 defines parameters for PostAgentCommandsByIdResult.
@@ -241,14 +225,7 @@ type PostAgentCommandsByIdResultParamsId1 = float32
 
 // PostAgentHeartbeatParams defines parameters for PostAgentHeartbeat.
 type PostAgentHeartbeatParams struct {
-	// XNosanaNode The node address the device key belongs to
-	XNosanaNode string `json:"x-nosana-node"`
-
-	// XNosanaTimestamp Unix seconds when the request was signed
-	XNosanaTimestamp string `json:"x-nosana-timestamp"`
-
-	// XNosanaSignature Base64 ed25519 signature, see signedMessage
-	XNosanaSignature string `json:"x-nosana-signature"`
+	Authorization string `json:"authorization"`
 }
 
 // PatchReleasesByVersionParams defines parameters for PatchReleasesByVersion.

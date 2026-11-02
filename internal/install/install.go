@@ -112,9 +112,6 @@ func Run(ctx context.Context, o Options, out io.Writer) error {
 		return err
 	}
 	say("node address %s", keys.Address(wallet))
-	if _, err := keys.Device(config.DeviceKeyPath); err != nil {
-		return err
-	}
 	if o.Token != "" {
 		if err := store.WriteFile(config.ClaimTokenPath, []byte(o.Token), 0o600); err != nil {
 			return err

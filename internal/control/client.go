@@ -1,14 +1,11 @@
 // Package control talks to host-manager: the claim, heartbeats, the command long-poll and command
-// results. After the claim every request is signed with the device key.
+// results. Every request is signed with the node wallet, the way the node itself talks to host-manager.
 package control
 
 import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -38,30 +35,21 @@ type Client struct {
 	base    string
 	address string
 	wallet  ed25519.PrivateKey
-	device  ed25519.PrivateKey
 	http    *http.Client
 }
 
-func New(controlURL string, wallet, device ed25519.PrivateKey) *Client {
+func New(controlURL string, wallet ed25519.PrivateKey) *Client {
 	return &Client{
 		base:    strings.TrimRight(controlURL, "/"),
 		address: keys.Address(wallet),
 		wallet:  wallet,
-		device:  device,
 		http:    &http.Client{Timeout: 40 * time.Second}, // above the 25 s long-poll
 	}
 }
 
-// Claim links this machine to the account that made the token. The request is signed with the
-// node wallet, the way the node itself talks to host-manager.
+// Claim links this node to the account that made the token.
 func (c *Client) Claim(ctx context.Context, token, hostname string) error {
-	body := api.ClaimBody{Token: token, DevicePublicKey: keys.PublicBase64(c.device), Hostname: hostname}
-	req, err := c.request(ctx, http.MethodPost, "/agent/claim", body)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", walletHeader(c.wallet, c.address))
-	return c.do(req, nil)
+	return c.signed(ctx, http.MethodPost, "/agent/claim", api.ClaimBody{Token: token, Hostname: hostname}, nil)
 }
 
 func (c *Client) Heartbeat(ctx context.Context, status api.AgentStatus) ([]api.AgentCommand, error) {
@@ -81,36 +69,16 @@ func (c *Client) Report(ctx context.Context, id int, result api.CommandResult) e
 	return c.signed(ctx, http.MethodPost, "/agent/commands/"+strconv.Itoa(id)+"/result", result, nil)
 }
 
-// signed sends a request signed with the device key: method, path, time and body hash.
+// signed sends a request with the SDK authorization header: the address, the base58 signature
+// over it with the node wallet, and the time in milliseconds.
 func (c *Client) signed(ctx context.Context, method, path string, body, out any) error {
 	req, err := c.request(ctx, method, path, body)
 	if err != nil {
 		return err
 	}
-	var raw []byte
-	if body != nil {
-		raw, _ = json.Marshal(body)
-	}
-	ts := strconv.FormatInt(time.Now().Unix(), 10)
-	sig := ed25519.Sign(c.device, SignedMessage(method, path, ts, raw))
-	req.Header.Set("X-Nosana-Node", c.address)
-	req.Header.Set("X-Nosana-Timestamp", ts)
-	req.Header.Set("X-Nosana-Signature", base64.StdEncoding.EncodeToString(sig))
+	sig := ed25519.Sign(c.wallet, []byte(c.address))
+	req.Header.Set("Authorization", c.address+":"+keys.Base58(sig)+":"+strconv.FormatInt(time.Now().UnixMilli(), 10))
 	return c.do(req, out)
-}
-
-// SignedMessage is what host-manager verifies: METHOD, path, unix seconds and the sha256 of the
-// body (hex), one per line.
-func SignedMessage(method, path, timestamp string, body []byte) []byte {
-	sum := sha256.Sum256(body)
-	return []byte(method + "\n" + path + "\n" + timestamp + "\n" + hex.EncodeToString(sum[:]))
-}
-
-// walletHeader is the SDK authorization header: the address, the base58 signature over it and
-// the time in milliseconds.
-func walletHeader(key ed25519.PrivateKey, address string) string {
-	sig := ed25519.Sign(key, []byte(address))
-	return address + ":" + keys.Base58(sig) + ":" + strconv.FormatInt(time.Now().UnixMilli(), 10)
 }
 
 func (c *Client) request(ctx context.Context, method, path string, body any) (*http.Request, error) {

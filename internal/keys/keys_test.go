@@ -1,7 +1,6 @@
 package keys
 
 import (
-	"crypto/ed25519"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -28,18 +27,6 @@ func TestWalletIsCreatedOnceAndReadBack(t *testing.T) {
 	}
 	if info, _ := os.Stat(path); info.Mode().Perm() != 0o600 {
 		t.Fatalf("wallet mode %o, want 0600", info.Mode().Perm())
-	}
-}
-
-func TestDeviceKeyIsStable(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "device_key")
-	a, _ := Device(path)
-	b, _ := Device(path)
-	if !a.Equal(b) {
-		t.Fatal("device key changed between reads")
-	}
-	if PublicBase64(a) == "" || len(a.Public().(ed25519.PublicKey)) != 32 {
-		t.Fatal("bad public key")
 	}
 }
 

@@ -62,16 +62,12 @@ func Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	device, err := keys.Device(config.DeviceKeyPath)
-	if err != nil {
-		return err
-	}
 	pc := podman.New(config.PodmanSocket)
 	sup := node.New(pc, st, cfg.Network)
 	d := &daemon{
 		cfg: cfg, st: st, pc: pc, sup: sup,
 		upd:  updater.New(cfg, st, sup, pc),
-		ctrl: control.New(cfg.ControlURL, wallet, device),
+		ctrl: control.New(cfg.ControlURL, wallet),
 		gpu:  api.GpuStatus{Gpus: []api.Gpu{}}, // host-manager wants an array before the first detection too
 	}
 	slog.Info("nosana-host", "version", version.Version, "node", keys.Address(wallet), "control", cfg.ControlURL)

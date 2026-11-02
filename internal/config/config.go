@@ -40,7 +40,6 @@ var (
 	BinDir         = filepath.Join(AgentDir, "bin")
 	CurrentBinary  = filepath.Join(BinDir, "current")
 	StatePath      = filepath.Join(AgentDir, "state.json")
-	DeviceKeyPath  = filepath.Join(AgentDir, "device_key")
 	ClaimTokenPath = filepath.Join(AgentDir, "claim_token")
 	NodeDir        = filepath.Join(StateDir, "node") // /root/.nosana inside the node container
 	WalletPath     = filepath.Join(NodeDir, "nosana_key.json")
