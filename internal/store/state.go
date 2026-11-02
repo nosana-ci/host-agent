@@ -32,7 +32,6 @@ type Pending struct {
 	Attempts int    `json:"attempts"` // starts counted by Preflight
 }
 
-// Store is the state file with a lock around it.
 type Store struct {
 	path  string
 	mu    sync.Mutex

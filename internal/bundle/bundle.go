@@ -69,7 +69,6 @@ func Install(ctx context.Context, m *manifest.Manifest) (string, error) {
 	return ver, configure(dir)
 }
 
-// Activate points runtime/current at version.
 func Activate(version string) error { return store.Relink(config.RuntimeCurrent, version) }
 
 // Prune removes every bundle but the active one and keep.

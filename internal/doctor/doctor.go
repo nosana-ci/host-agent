@@ -54,7 +54,6 @@ var fixes = map[string]func(ctx context.Context) error{
 	"persistenced": func(context.Context) error { return service.Systemctl("enable", "--now", "nvidia-persistenced") },
 }
 
-// Fix applies the fix of one check.
 func Fix(ctx context.Context, id string) error {
 	fix, ok := fixes[id]
 	if !ok {

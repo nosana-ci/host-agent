@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 )
 
-// WriteFile writes data to a temporary file next to path, syncs it and renames it into place.
 func WriteFile(path string, data []byte, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
@@ -44,7 +43,6 @@ func Relink(link, target string) error {
 	return syncDir(filepath.Dir(link))
 }
 
-// CopyFile copies src to dst with mode, through WriteFile.
 func CopyFile(src, dst string, mode os.FileMode) error {
 	raw, err := os.ReadFile(src)
 	if err != nil {

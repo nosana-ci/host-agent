@@ -34,7 +34,7 @@ const (
 	stopTimeout   = 2 * time.Minute
 	maxBackoff    = 5 * time.Minute
 	stableAfter   = 2 * time.Minute // running this long forgets earlier crashes
-	// ExitRespawn is the node's "start me again" exit code (node/src/exitCodes.ts).
+	// exitRespawn is the node's "start me again" exit code (node/src/exitCodes.ts).
 	exitRespawn = 129
 )
 
