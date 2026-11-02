@@ -72,13 +72,14 @@ func main() {
 
 func cmdInstall(args []string) error {
 	fs := flag.NewFlagSet("install", flag.ExitOnError)
-	var o install.Options
-	fs.StringVar(&o.ControlURL, "control-url", "", "host-manager URL")
-	fs.StringVar(&o.ReleaseURL, "release-url", "", "where stable.json and stable.json.sig live")
-	fs.StringVar(&o.Network, "network", "", "mainnet or devnet")
-	fs.StringVar(&o.Token, "token", "", "claim token from the console's install command")
+	var cfg config.Config
+	fs.StringVar(&cfg.ControlURL, "control-url", "", "host-manager URL")
+	fs.StringVar(&cfg.ReleaseURL, "release-url", "", "where stable.json and stable.json.sig live")
+	fs.StringVar(&cfg.Network, "network", "", "mainnet or devnet")
+	token := fs.String("token", "", "claim token from the console's install command")
 	_ = fs.Parse(args)
-	return install.Run(context.Background(), o, os.Stdout)
+	return install.Run(context.Background(), cfg, *token, os.Stdout)
+
 }
 
 func cmdStatus() error {

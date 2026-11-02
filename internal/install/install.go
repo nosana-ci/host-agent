@@ -28,14 +28,9 @@ import (
 	"github.com/nosana-ci/host-agent/internal/version"
 )
 
-type Options struct {
-	ControlURL string
-	ReleaseURL string
-	Network    string
-	Token      string
-}
-
-func Run(ctx context.Context, o Options, out io.Writer) (err error) {
+// Run installs or repairs the agent. Fields set in given replace the saved config; token links the
+// host to an account.
+func Run(ctx context.Context, given config.Config, token string, out io.Writer) (err error) {
 	say := sayTo(out)
 
 	cfg, err := config.Load()
@@ -48,14 +43,14 @@ func Run(ctx context.Context, o Options, out io.Writer) (err error) {
 			}
 		}()
 	}
-	if o.ControlURL != "" {
-		cfg.ControlURL = o.ControlURL
+	if given.ControlURL != "" {
+		cfg.ControlURL = given.ControlURL
 	}
-	if o.ReleaseURL != "" {
-		cfg.ReleaseURL = o.ReleaseURL
+	if given.ReleaseURL != "" {
+		cfg.ReleaseURL = given.ReleaseURL
 	}
-	if o.Network != "" {
-		cfg.Network = o.Network
+	if given.Network != "" {
+		cfg.Network = given.Network
 	}
 	if cfg.ControlURL == "" || cfg.ReleaseURL == "" || (cfg.Network != "mainnet" && cfg.Network != "devnet") {
 		return errors.New("--control-url, --release-url and --network (mainnet or devnet) are required on a first install")
@@ -124,8 +119,9 @@ func Run(ctx context.Context, o Options, out io.Writer) (err error) {
 		return err
 	}
 	say("node address %s", keys.Address(wallet))
-	if o.Token != "" {
-		if err := st.Update(func(s *store.State) { s.ClaimToken = o.Token }); err != nil {
+	if token != "" {
+		if err := st.Update(func(s *store.State) { s.ClaimToken = token }); err != nil {
+
 			return err
 		}
 		say("claim token saved; the agent links this host to your account on start")
