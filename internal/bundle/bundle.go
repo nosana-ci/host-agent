@@ -94,38 +94,6 @@ func FirewallDriver() string {
 	return ""
 }
 
-// EnsureFirewallTool installs nftables when neither nft nor iptables is present.
-func EnsureFirewallTool(ctx context.Context) error {
-	if FirewallDriver() != "" {
-		return nil
-	}
-	if _, err := exec.LookPath("apt-get"); err != nil {
-		return errors.New("container networking needs nftables or iptables; install one of them")
-	}
-	for _, args := range [][]string{{"update", "-qq"}, {"install", "-y", "-qq", "nftables"}} {
-		cmd := exec.CommandContext(ctx, "apt-get", args...)
-		cmd.Env = append(os.Environ(), "DEBIAN_FRONTEND=noninteractive")
-		if out, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("apt-get %s: %v: %s", args[0], err, lastLine(out))
-		}
-	}
-	return nil
-}
-
-// EnsurePolicy writes podman's image policy where it looks for it (there is no setting for the
-// path) when the host has none.
-func EnsurePolicy() error {
-	const path = "/etc/containers/policy.json"
-	if _, err := os.Stat(path); err == nil {
-		return nil
-	}
-	raw, err := os.ReadFile(filepath.Join(config.RuntimeCurrent, "etc", "policy.json"))
-	if err != nil {
-		raw = []byte(`{"default":[{"type":"insecureAcceptAnything"}]}` + "\n")
-	}
-	return store.WriteFile(path, raw, 0o644)
-}
-
 // jobLogSizeMax caps every container log the node creates through this podman.
 const jobLogSizeMax = 50 << 20
 
@@ -236,9 +204,4 @@ func untar(src, dst string) error {
 			_ = os.Symlink(h.Linkname, p)
 		}
 	}
-}
-
-func lastLine(b []byte) string {
-	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
-	return lines[len(lines)-1]
 }

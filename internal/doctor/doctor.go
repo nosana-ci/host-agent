@@ -4,6 +4,7 @@ package doctor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -51,7 +52,7 @@ func Run(ctx context.Context, controlURL string, pc *podman.Client) (api.GpuStat
 
 var fixes = map[string]func(ctx context.Context) error{
 	"podman":       func(context.Context) error { return service.Systemctl("restart", service.PodmanUnit) },
-	"firewall":     bundle.EnsureFirewallTool,
+	"firewall":     EnsureFirewallTool,
 	"persistenced": func(context.Context) error { return service.Systemctl("enable", "--now", "nvidia-persistenced") },
 }
 
@@ -61,6 +62,29 @@ func Fix(ctx context.Context, id string) error {
 		return fmt.Errorf("no automatic fix for check %q", id)
 	}
 	return fix(ctx)
+}
+
+// EnsureFirewallTool installs nftables when neither nft nor iptables is present.
+func EnsureFirewallTool(ctx context.Context) error {
+	if bundle.FirewallDriver() != "" {
+		return nil
+	}
+	if _, err := exec.LookPath("apt-get"); err != nil {
+		return errors.New("container networking needs nftables or iptables; install one of them")
+	}
+	for _, args := range [][]string{{"update", "-qq"}, {"install", "-y", "-qq", "nftables"}} {
+		cmd := exec.CommandContext(ctx, "apt-get", args...)
+		cmd.Env = append(os.Environ(), "DEBIAN_FRONTEND=noninteractive")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("apt-get %s: %v: %s", args[0], err, lastLine(out))
+		}
+	}
+	return nil
+}
+
+func lastLine(b []byte) string {
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	return lines[len(lines)-1]
 }
 
 func check(id, title string, status api.CheckStatus, detail string) api.Check {

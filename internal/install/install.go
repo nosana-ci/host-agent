@@ -17,6 +17,7 @@ import (
 
 	"github.com/nosana-ci/host-agent/internal/bundle"
 	"github.com/nosana-ci/host-agent/internal/config"
+	"github.com/nosana-ci/host-agent/internal/doctor"
 	"github.com/nosana-ci/host-agent/internal/keys"
 	"github.com/nosana-ci/host-agent/internal/manifest"
 	"github.com/nosana-ci/host-agent/internal/node"
@@ -99,7 +100,7 @@ func Run(ctx context.Context, o Options, out io.Writer) (err error) {
 	if err != nil {
 		return fmt.Errorf("read the release from %s: %w", cfg.ReleaseURL, err)
 	}
-	if err := bundle.EnsureFirewallTool(ctx); err != nil {
+	if err := doctor.EnsureFirewallTool(ctx); err != nil {
 		say("warning: %v", err)
 	}
 	// A podman restart can break a running job: only when what it runs changed.
@@ -115,7 +116,7 @@ func Run(ctx context.Context, o Options, out io.Writer) (err error) {
 		}
 		say("container runtime %s installed", ver)
 	}
-	if err := bundle.EnsurePolicy(); err != nil {
+	if err := ensurePolicy(); err != nil {
 		return err
 	}
 	_ = st.Update(func(s *store.State) { s.NodeImage = m.Node.Image })
@@ -196,7 +197,22 @@ func Uninstall(ctx context.Context, purge bool, out io.Writer) error {
 	return nil
 }
 
+// ensurePolicy writes podman's image policy where it looks for it (there is no setting for the
+// path) when the host has none.
+func ensurePolicy() error {
+	const path = "/etc/containers/policy.json"
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	}
+	raw, err := os.ReadFile(filepath.Join(config.RuntimeCurrent, "etc", "policy.json"))
+	if err != nil {
+		raw = []byte(`{"default":[{"type":"insecureAcceptAnything"}]}` + "\n")
+	}
+	return store.WriteFile(path, raw, 0o644)
+}
+
 // sayTo writes the "• " progress lines of install and uninstall.
+
 func sayTo(out io.Writer) func(format string, args ...any) {
 	return func(format string, args ...any) { fmt.Fprintf(out, "• "+format+"\n", args...) }
 }
