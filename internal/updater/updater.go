@@ -32,11 +32,10 @@ const (
 )
 
 type Updater struct {
-	cfg  config.Config
-	st   *store.Store
-	sup  *node.Supervisor
-	pc   *podman.Client
-	wake chan struct{}
+	cfg config.Config
+	st  *store.Store
+	sup *node.Supervisor
+	pc  *podman.Client
 
 	apply  sync.Mutex // one Check applies at a time: Run and the commands may call it together
 	mu     sync.Mutex
@@ -45,7 +44,7 @@ type Updater struct {
 }
 
 func New(cfg config.Config, st *store.Store, sup *node.Supervisor, pc *podman.Client) *Updater {
-	u := &Updater{cfg: cfg, st: st, sup: sup, pc: pc, wake: make(chan struct{}, 1), status: api.UpdateStatus{State: "idle"}}
+	u := &Updater{cfg: cfg, st: st, sup: sup, pc: pc, status: api.UpdateStatus{State: "idle"}}
 	if p := st.State().Update.Pending; p != nil && p.Version == version.Version {
 		u.set("pending", "version "+p.Version+" is kept after "+keepAfter.String()+" up")
 	}
@@ -93,7 +92,6 @@ func (u *Updater) Run(ctx context.Context) {
 			keep = nil
 			u.commit()
 		case <-time.After(checkEvery):
-		case <-u.wake:
 		}
 	}
 }
@@ -160,14 +158,6 @@ func (u *Updater) Exec() {
 	if ready {
 		slog.Info("switching to agent", "to", binVersion(mustReadlink(config.CurrentBinary)))
 		execSelf()
-	}
-}
-
-// Poke makes Run check now.
-func (u *Updater) Poke() {
-	select {
-	case u.wake <- struct{}{}:
-	default:
 	}
 }
 
