@@ -28,6 +28,7 @@ const (
 	subnet        = "192.168.101.0/24"
 	apiPort       = 15001 // the node's port 5001, published on localhost
 	labelImage    = "io.nosana.host.image"
+	labelNetwork  = "io.nosana.host.network"
 	logSizeMax    = 10 << 20
 	tick          = 5 * time.Second
 	stopTimeout   = 2 * time.Minute
@@ -185,8 +186,8 @@ func (s *Supervisor) reconcile(ctx context.Context) error {
 		s.restart = false // only once it happened; podman may have been away
 		s.mu.Unlock()
 		return s.pc.StartContainer(ctx, ContainerName)
-	case image != "" && ctr.Config.Labels[labelImage] != image && !s.Busy():
-		slog.Info("node: switching image", "image", image)
+	case image != "" && (ctr.Config.Labels[labelImage] != image || ctr.Config.Labels[labelNetwork] != s.network) && !s.Busy():
+		slog.Info("node: recreating", "image", image, "network", s.network)
 		if err := s.pc.RemoveContainer(ctx, ContainerName); err != nil {
 			return err
 		}
@@ -250,7 +251,7 @@ func (s *Supervisor) create(ctx context.Context, image string) error {
 		Image:   image,
 		Command: []string{"start", "--network", s.network},
 		Env:     map[string]string{"NOSANA_HOST_VERSION": version.Version},
-		Labels:  map[string]string{labelImage: image},
+		Labels:  map[string]string{labelImage: image, labelNetwork: s.network},
 		Mounts: []podman.Mount{
 			{Source: config.NodeDir, Destination: "/root/.nosana"},
 			{Source: config.PodmanSocketDir, Destination: "/root/.nosana/podman"},
