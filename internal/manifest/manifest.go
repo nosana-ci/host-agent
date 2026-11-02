@@ -5,12 +5,16 @@ package manifest
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -42,7 +46,10 @@ type Manifest struct {
 	} `json:"node"`
 }
 
-var client = &http.Client{Timeout: 30 * time.Second}
+var (
+	client         = &http.Client{Timeout: 30 * time.Second}
+	downloadClient = &http.Client{Timeout: 15 * time.Minute}
+)
 
 // Fetch reads <releaseURL>/stable.json and its signature and checks it with the release key
 // built into this binary.
@@ -94,4 +101,45 @@ func get(ctx context.Context, url string) ([]byte, error) {
 		return nil, fmt.Errorf("%s: HTTP %d", url, resp.StatusCode)
 	}
 	return raw, nil
+}
+
+// Download fetches the artifact to dst; dst appears only when the sha256 matched.
+func (a Artifact) Download(ctx context.Context, dst string, mode os.FileMode) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.Url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := downloadClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("download %s: HTTP %d", a.Url, resp.StatusCode)
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	tmp := dst + ".download"
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
+	if err != nil {
+		return err
+	}
+	h := sha256.New()
+	_, err = io.Copy(io.MultiWriter(f, h), resp.Body)
+	if err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if got := hex.EncodeToString(h.Sum(nil)); !strings.EqualFold(got, a.Sha256) {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("checksum mismatch for %s: got %s, the manifest says %s", a.Url, got, a.Sha256)
+	}
+	return os.Rename(tmp, dst)
 }

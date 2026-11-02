@@ -21,7 +21,6 @@ import (
 	"github.com/nosana-ci/host-agent/internal/config"
 	"github.com/nosana-ci/host-agent/internal/manifest"
 	"github.com/nosana-ci/host-agent/internal/store"
-	"github.com/nosana-ci/host-agent/internal/updater/download"
 )
 
 // Platform is this machine's key in a manifest's artifacts.
@@ -49,7 +48,7 @@ func Install(ctx context.Context, m *manifest.Manifest) (string, error) {
 		return ver, configure(dir)
 	}
 	tmp := filepath.Join(config.RuntimeDir, "."+ver+".tar.gz")
-	if err := download.File(ctx, art.Url, tmp, art.Sha256, 0o600); err != nil {
+	if err := art.Download(ctx, tmp, 0o600); err != nil {
 		return "", err
 	}
 	defer func() { _ = os.Remove(tmp) }()

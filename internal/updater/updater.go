@@ -20,7 +20,6 @@ import (
 	"github.com/nosana-ci/host-agent/internal/podman"
 	"github.com/nosana-ci/host-agent/internal/service"
 	"github.com/nosana-ci/host-agent/internal/store"
-	"github.com/nosana-ci/host-agent/internal/updater/download"
 	"github.com/nosana-ci/host-agent/internal/version"
 )
 
@@ -182,7 +181,7 @@ func (u *Updater) installAgent(ctx context.Context, m *manifest.Manifest) error 
 		return errors.New("agent is not installed (no bin/current)")
 	}
 	dst := config.BinaryPath(m.Version)
-	if err := download.File(ctx, art.Url, dst, art.Sha256, 0o755); err != nil {
+	if err := art.Download(ctx, dst, 0o755); err != nil {
 		return err
 	}
 	// A binary that cannot run here could not roll itself back: try it before switching.
