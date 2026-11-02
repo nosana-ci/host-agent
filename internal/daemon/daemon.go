@@ -85,13 +85,9 @@ func Run(ctx context.Context) error {
 }
 
 func (d *daemon) doctorLoop(ctx context.Context) {
-	for {
+	for ctx.Err() == nil {
 		d.runDoctor(ctx)
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(doctorEvery):
-		}
+		sleep(ctx, doctorEvery)
 	}
 }
 
@@ -108,7 +104,7 @@ func (d *daemon) runDoctor(ctx context.Context) []api.Check {
 // heartbeatEvery. Failures back off up to five minutes.
 func (d *daemon) heartbeatLoop(ctx context.Context) {
 	fails := 0
-	for {
+	for ctx.Err() == nil {
 		var err error
 		if d.st.State().Claimed {
 			err = d.heartbeat(ctx)
@@ -125,11 +121,7 @@ func (d *daemon) heartbeatLoop(ctx context.Context) {
 		} else {
 			fails = 0
 		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(wait):
-		}
+		sleep(ctx, wait)
 	}
 }
 
