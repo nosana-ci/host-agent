@@ -55,8 +55,6 @@ ExecStart=%s daemon
 SyslogIdentifier=nosana-host
 Restart=always
 RestartSec=3
-# The agent never takes the node down with it.
-KillMode=process
 
 [Install]
 WantedBy=multi-user.target
