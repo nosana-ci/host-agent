@@ -69,6 +69,7 @@ func main() {
 	case "node":
 		err = cmdNode(os.Args[2:])
 	case "update":
+		fmt.Println("checking the release; a download can take a few minutes")
 		err = cmdCommand("update")
 	case "daemon":
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
