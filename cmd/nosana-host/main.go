@@ -132,17 +132,12 @@ func cmdLogs(args []string) error {
 	_ = fs.Parse(args)
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://agent/logs/%s?tail=%d&follow=%t", what, *tail, *follow), nil)
-	resp, err := local.Client().Do(req)
+	body, err := call(ctx, http.MethodGet, fmt.Sprintf("/logs/%s?tail=%d&follow=%t", what, *tail, *follow))
 	if err != nil {
-		return local.Explain(err)
+		return err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		msg, _ := io.ReadAll(resp.Body)
-		return errors.New(strings.TrimSpace(string(msg)))
-	}
-	_, err = io.Copy(os.Stdout, resp.Body)
+	defer body.Close()
+	_, err = io.Copy(os.Stdout, body)
 	if ctx.Err() != nil {
 		return nil
 	}
@@ -196,17 +191,28 @@ func cmdCommand(verb string) error {
 	return nil
 }
 
-// agent calls the running agent over its socket and decodes the JSON answer into out.
+// agent calls the running agent and decodes its JSON answer into out.
 func agent(method, path string, out any) error {
-	req, _ := http.NewRequest(method, "http://agent"+path, nil)
+	body, err := call(context.Background(), method, path)
+	if err != nil {
+		return err
+	}
+	defer body.Close()
+	return json.NewDecoder(body).Decode(out)
+}
+
+// call sends a request to the running agent over its socket and returns the answer's body, or the
+// agent's error message; the caller closes the body.
+func call(ctx context.Context, method, path string) (io.ReadCloser, error) {
+	req, _ := http.NewRequestWithContext(ctx, method, "http://agent"+path, nil)
 	resp, err := local.Client().Do(req)
 	if err != nil {
-		return local.Explain(err)
+		return nil, local.Explain(err)
 	}
-	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		defer resp.Body.Close()
 		msg, _ := io.ReadAll(resp.Body)
-		return errors.New(strings.TrimSpace(string(msg)))
+		return nil, errors.New(strings.TrimSpace(string(msg)))
 	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	return resp.Body, nil
 }
