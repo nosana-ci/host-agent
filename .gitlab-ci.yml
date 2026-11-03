@@ -1,0 +1,54 @@
+# Tests on every change. A tag v<version> builds linux-amd64 and the runtime bundle, writes the
+# signed manifest (stable.json, stable.json.sig) and publishes all four files as a GitHub Release
+# on the open-source mirror, github.com/nosana-ci/host-agent. Agents and install.sh read
+# .../releases/latest/download/stable.json, so the newest full release is "stable". To halt a
+# release, mark it as a pre-release on GitHub: "latest" then points at the previous one, and agents
+# never install a version lower than their own.
+#
+# Project variables, set by infra/git from 1Password: RELEASE_SIGNING_KEY (the base64 ed25519 seed),
+# RELEASE_PUBLIC_KEY, GITHUB_TOKEN (writes releases on the mirror). NODE_IMAGE below is the node
+# image a release runs; change it here when the node moves.
+
+image: golang:1.27
+
+stages: [test, release]
+
+variables:
+  RUNTIME_VERSION: "5.8.8"
+  NODE_IMAGE: docker.io/nosana/nosana-node:latest
+  GITHUB_REPO: nosana-ci/host-agent
+
+test:
+  stage: test
+  script:
+    - go vet ./...
+    - go test ./...
+  rules:
+    - if: $CI_MERGE_REQUEST_ID
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
+
+release:
+  stage: release
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq gpg curl jq
+  script:
+    - export VERSION="${CI_COMMIT_TAG#v}"
+    - make build VERSION="$VERSION" RELEASE_PUBLIC_KEY="$RELEASE_PUBLIC_KEY"
+    - make runtime RUNTIME="$RUNTIME_VERSION"
+    - export RUNTIME_FILE="nosana-runtime-${RUNTIME_VERSION}-linux-amd64.tar.gz"
+    - export DOWNLOAD="https://github.com/${GITHUB_REPO}/releases/download/${CI_COMMIT_TAG}"
+    - go run ./cmd/nosana-host-publish
+        --version "$VERSION"
+        --agent "$DOWNLOAD/nosana-host-linux-amd64" --agent-sha "$(sha256sum bin/nosana-host | cut -d' ' -f1)"
+        --runtime-version "$RUNTIME_VERSION"
+        --runtime "$DOWNLOAD/$RUNTIME_FILE" --runtime-sha "$(sha256sum "bin/$RUNTIME_FILE" | cut -d' ' -f1)"
+        --node-image "$NODE_IMAGE"
+        --out bin
+    - cp bin/nosana-host bin/nosana-host-linux-amd64
+    - scripts/github-release.sh "$GITHUB_REPO" "$CI_COMMIT_TAG" "$CI_COMMIT_SHA"
+        bin/nosana-host-linux-amd64 "bin/$RUNTIME_FILE" bin/stable.json bin/stable.json.sig
+  artifacts:
+    paths: [bin/]
