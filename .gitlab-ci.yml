@@ -1,4 +1,5 @@
-# Tests on every change. A tag v<version> builds linux-amd64 and the runtime bundle, writes the
+# Tests on every change. On main, the manual "tag" job (the shared semver release, as in our other
+# repos) pushes the next v<version> tag. That tag builds linux-amd64 and the runtime bundle, writes the
 # signed manifest (stable.json, stable.json.sig) and publishes all four files as a GitHub Release
 # on the open-source mirror, github.com/nosana-ci/host-agent. Agents and install.sh read
 # .../releases/latest/download/stable.json, so the newest full release is "stable". To halt a
@@ -8,6 +9,10 @@
 # Project variables, set by infra/git from 1Password: RELEASE_SIGNING_KEY (the base64 ed25519 seed),
 # RELEASE_PUBLIC_KEY, GITHUB_TOKEN (writes releases on the mirror). NODE_IMAGE below is the node
 # image a release runs; change it here when the node moves.
+
+include:
+  - project: nosana-ci/tools/cicd/gitlab-ci
+    file: templates/semver.yml
 
 image: golang:1.27
 
@@ -28,7 +33,16 @@ test:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: $CI_COMMIT_TAG
 
-release:
+# Manual: every release reaches all hosts on their next update check.
+tag:
+  extends: .release
+  stage: release
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
+      allow_failure: true
+
+publish:
   stage: release
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
