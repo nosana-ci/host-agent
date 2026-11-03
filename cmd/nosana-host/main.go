@@ -111,10 +111,27 @@ func cmdStatus() error {
 	n := s.Status.Node
 	nodeLine := n.Container + " (" + n.Image + ")"
 	if n.State != nil {
-		nodeLine += " " + *n.State
+		nodeLine += ", reports " + *n.State
+	}
+	if n.Desired == api.Stopped {
+		nodeLine += "\n             stopped by the owner; nosana-host node start runs it again"
+	}
+	if n.Restarts > 0 {
+		nodeLine += fmt.Sprintf("\n             %d restarts after crashes", n.Restarts)
+	}
+	if n.LastError != nil {
+		nodeLine += "\n             last error: " + *n.LastError
+	}
+	u := s.Status.Agent.Update
+	update := u.State
+	if u.LatestVersion != nil {
+		update += ", latest " + *u.LatestVersion
+	}
+	if u.Detail != nil {
+		update += ": " + *u.Detail
 	}
 	fmt.Printf("agent        %s\nhost-manager %s (%s)\nnode address %s\nlinked       %s\nnode         %s\nchecks       %s\nupdate       %s\n",
-		s.Agent, s.ControlURL, s.Network, s.NodeAddress, linked, nodeLine, doctor.Summary(s.Status.Checks), s.Status.Agent.Update.State)
+		s.Agent, s.ControlURL, s.Network, s.NodeAddress, linked, nodeLine, doctor.Summary(s.Status.Checks), update)
 	if s.LastRollback != "" {
 		fmt.Printf("rollback     %s\n", s.LastRollback)
 	}
