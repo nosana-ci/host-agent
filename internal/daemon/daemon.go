@@ -37,6 +37,7 @@ type daemon struct {
 	sup  *node.Supervisor
 	upd  *updater.Updater
 	ctrl *control.Client
+	bal  *walletBalance
 	cmds chan []api.AgentCommand
 
 	mu     sync.Mutex
@@ -68,6 +69,7 @@ func Run(ctx context.Context) error {
 		cfg: cfg, st: st, pc: pc, sup: sup,
 		upd:  updater.New(cfg, st, sup, pc),
 		ctrl: control.New(cfg.ControlURL, wallet),
+		bal:  newWalletBalance(cfg.Network, keys.Address(wallet)),
 		cmds: make(chan []api.AgentCommand, 16),
 		// host-manager wants arrays before the first doctor run too
 		gpu:    api.GpuStatus{Gpus: []api.Gpu{}},
@@ -76,7 +78,7 @@ func Run(ctx context.Context) error {
 	slog.Info("nosana-host", "version", version.Version, "node", keys.Address(wallet), "control", cfg.ControlURL)
 
 	var wg sync.WaitGroup
-	for _, run := range []func(context.Context){d.sup.Run, d.upd.Run, d.doctorLoop, d.heartbeatLoop, d.pollLoop, d.commandLoop} {
+	for _, run := range []func(context.Context){d.sup.Run, d.upd.Run, d.bal.run, d.doctorLoop, d.heartbeatLoop, d.pollLoop, d.commandLoop} {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -235,6 +237,7 @@ func (d *daemon) status(ctx context.Context) api.AgentStatus {
 		Disk:    doctor.Disk(),
 		Checks:  checks,
 		Runtime: d.runtimeStatus(ctx),
+		Wallet:  d.bal.status(),
 	}
 }
 
