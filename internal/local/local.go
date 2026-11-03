@@ -16,7 +16,6 @@ import (
 
 	"github.com/nosana-ci/host-agent/internal/api"
 	"github.com/nosana-ci/host-agent/internal/config"
-	"github.com/nosana-ci/host-agent/internal/store"
 )
 
 const Group = "nosana"
@@ -32,8 +31,8 @@ type Status struct {
 	Claimed      bool   `json:"claimed"`
 	ClaimPending bool   `json:"claimPending"` // a saved token the agent still has to use
 
-	Status api.AgentStatus `json:"status"`
-	Update store.Update    `json:"update"`
+	LastRollback string          `json:"lastRollback,omitempty"`
+	Status       api.AgentStatus `json:"status"`
 }
 
 // Listen opens the socket for root and the nosana group.

@@ -48,7 +48,7 @@ func (d *daemon) localHandler() http.Handler {
 		s := d.st.State()
 		writeJSON(w, local.Status{
 			Agent: version.Version, NodeAddress: d.address, ControlURL: d.cfg.ControlURL, Network: d.cfg.Network,
-			Claimed: s.Claimed, ClaimPending: s.ClaimToken != "", Status: d.status(r.Context()), Update: s.Update,
+			Claimed: s.Claimed, ClaimPending: s.ClaimToken != "", LastRollback: s.Update.LastRollback, Status: d.status(r.Context()),
 		})
 	})
 	mux.HandleFunc("POST /commands/{verb}", func(w http.ResponseWriter, r *http.Request) {

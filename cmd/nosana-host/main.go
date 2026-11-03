@@ -115,8 +115,8 @@ func cmdStatus() error {
 	}
 	fmt.Printf("agent        %s\nhost-manager %s (%s)\nnode address %s\nlinked       %s\nnode         %s\nchecks       %s\nupdate       %s\n",
 		s.Agent, s.ControlURL, s.Network, s.NodeAddress, linked, nodeLine, doctor.Summary(s.Status.Checks), s.Status.Agent.Update.State)
-	if s.Update.LastRollback != "" {
-		fmt.Printf("rollback     %s\n", s.Update.LastRollback)
+	if s.LastRollback != "" {
+		fmt.Printf("rollback     %s\n", s.LastRollback)
 	}
 	return nil
 }
