@@ -12,7 +12,7 @@
 
 include:
   - project: nosana-ci/tools/cicd/gitlab-ci
-    file: templates/release.yml
+    file: templates/semver.yml
 
 image: golang:1.27
 
