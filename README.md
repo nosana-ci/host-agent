@@ -34,7 +34,7 @@ journalctl -u nosana-host -f       # the agent's log
 sudo nosana-host uninstall [--purge]   # --purge deletes state too, after backing up the wallet into your home
 ```
 
-Install script: `host-console/public/install.sh`.
+Install script: `host-console/static/install.sh`.
 
 ## What the agent does
 
@@ -84,8 +84,8 @@ state), `keys`, `config`.
 
 ## Releases
 
-The agent is open source on GitHub (`github.com/nosana-ci/host-agent`, a mirror of the GitLab
-project), and releases are GitHub Releases there. A tag `vX.Y.Z` runs the `release` CI job:
+The agent is open source on GitHub (`github.com/nosana-ci/host-agent`), and releases are GitHub
+Releases there. A tag `vX.Y.Z` runs the release pipeline:
 `make build`, `make runtime` (the podman bundle from the GPG-verified podman-static release),
 `nosana-host-publish` (writes the manifest and signs it with `RELEASE_SIGNING_KEY`), then
 `scripts/github-release.sh` publishes the binary, the runtime bundle, `stable.json` and
@@ -107,6 +107,6 @@ RELEASE_SIGNING_KEY=... go run ./cmd/nosana-host-publish --version 0.1.0 \
   --runtime-version 5.8.8 --runtime http://127.0.0.1:8000/nosana-runtime-5.8.8-linux-amd64.tar.gz \
   --runtime-sha "$(sha256sum bin/nosana-runtime-5.8.8-linux-amd64.tar.gz | cut -d' ' -f1)" \
   --node-image docker.io/nosana/nosana-node:latest --out bin
-sudo sh ../host-console-v1/public/install.sh --host-manager http://localhost:3005 \
+sudo sh ../host-console-v1/static/install.sh --host-manager http://localhost:3005 \
   --release-url http://127.0.0.1:8000 --network devnet --token <token>
 ```
