@@ -124,7 +124,7 @@ func cmdStatus() error {
 func cmdLogs(args []string) error {
 	fs := flag.NewFlagSet("logs", flag.ExitOnError)
 	follow := fs.Bool("f", false, "keep following")
-	tail := fs.Int("n", 100, "lines to show first")
+	tail := fs.Int("n", 100, "lines to show first; 0 for all")
 	what := "node"
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		what, args = args[0], args[1:]

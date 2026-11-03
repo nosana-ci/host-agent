@@ -81,15 +81,19 @@ func (d *daemon) localHandler() http.Handler {
 		}
 	})
 	mux.HandleFunc("GET /logs/{what}", func(w http.ResponseWriter, r *http.Request) {
-		tail, follow := r.URL.Query().Get("tail"), r.URL.Query().Get("follow") == "true"
+		tail, _ := strconv.Atoi(r.URL.Query().Get("tail")) // 0 or missing: everything
+		follow := r.URL.Query().Get("follow") == "true"
 		out := flushWriter{w}
 		var err error
 		switch r.PathValue("what") {
 		case "node":
-			n, _ := strconv.Atoi(tail)
-			err = d.pc.Logs(r.Context(), node.ContainerName, n, follow, out)
+			err = d.pc.Logs(r.Context(), node.ContainerName, tail, follow, out)
 		case "agent":
-			args := []string{"-u", service.AgentUnit, "--no-pager", "-n", tail}
+			lines := "all"
+			if tail > 0 {
+				lines = strconv.Itoa(tail)
+			}
+			args := []string{"-u", service.AgentUnit, "--no-pager", "-n", lines}
 			if follow {
 				args = append(args, "-f")
 			}
