@@ -64,6 +64,19 @@ func (c *Client) WaitCommands(ctx context.Context) ([]api.AgentCommand, error) {
 	return out.Commands, err
 }
 
+// Registration is the node's contact details, as the node asks them on its first start.
+type Registration struct {
+	Email   string `json:"email"`
+	Discord string `json:"discord,omitempty"`
+	Twitter string `json:"twitter,omitempty"`
+}
+
+// Register is the node's own registration with host-manager, signed with the node wallet. For a
+// host the console linked it fills in the contact details the link left empty.
+func (c *Client) Register(ctx context.Context, r Registration) error {
+	return c.signed(ctx, http.MethodPost, "/nodes/register", r, nil)
+}
+
 func (c *Client) Report(ctx context.Context, id int, result api.CommandResult) error {
 	return c.signed(ctx, http.MethodPost, "/agent/commands/"+strconv.Itoa(id)+"/result", result, nil)
 }

@@ -34,6 +34,7 @@ nosana-host logs [node|agent] -f   # the node container's log, or the agent's jo
 nosana-host doctor [--fix ID]      # the host checks; --fix applies the fix of one check
 nosana-host node start|stop|restart   # the node container, like the console's buttons
 nosana-host update                 # install the current release now
+nosana-host register               # the node's email (and Discord, Twitter) and the Participation Agreement
 sudo nosana-host uninstall [--purge]   # --purge deletes state too, after backing up the wallet into your home
 ```
 

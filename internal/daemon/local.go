@@ -4,14 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"os/exec"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/nosana-ci/host-agent/internal/api"
+	"github.com/nosana-ci/host-agent/internal/control"
 	"github.com/nosana-ci/host-agent/internal/local"
 	"github.com/nosana-ci/host-agent/internal/node"
 	"github.com/nosana-ci/host-agent/internal/service"
@@ -80,6 +84,29 @@ func (d *daemon) localHandler() http.Handler {
 			writeJSON(w, checks)
 		}
 	})
+	// The node's registration from the CLI, which had the owner accept the Participation Agreement.
+	// It does not touch the node, so it skips the command queue.
+	mux.HandleFunc("POST /register", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		reg := control.Registration{Email: strings.TrimSpace(q.Get("email")), Discord: strings.TrimSpace(q.Get("discord")), Twitter: strings.TrimSpace(q.Get("twitter"))}
+		switch {
+		case q.Get("accept") != "1":
+			http.Error(w, "the Participation Agreement has to be accepted first", http.StatusBadRequest)
+		case !emailRe.MatchString(reg.Email):
+			http.Error(w, fmt.Sprintf("%q is not an email address", reg.Email), http.StatusBadRequest)
+		default:
+			if err := d.ctrl.Register(r.Context(), reg); err != nil {
+				var he *control.HTTPError
+				if errors.As(err, &he) && he.Status == http.StatusInternalServerError {
+					err = errors.New("host-manager refused it; a node that registered before cannot register again")
+				}
+				http.Error(w, "register: "+err.Error(), http.StatusBadGateway)
+				return
+			}
+			slog.Info("registered the node", "email", reg.Email)
+			writeJSON(w, api.CommandResult{Ok: true, Message: "registered the node as " + reg.Email})
+		}
+	})
 	mux.HandleFunc("GET /logs/{what}", func(w http.ResponseWriter, r *http.Request) {
 		tail, _ := strconv.Atoi(r.URL.Query().Get("tail")) // 0 or missing: everything
 		follow := r.URL.Query().Get("follow") == "true"
@@ -127,6 +154,9 @@ func (d *daemon) runQueued(ctx context.Context, c api.AgentCommand) (result api.
 		return result, false
 	}
 }
+
+// emailRe is the node's own rule for an email address.
+var emailRe = regexp.MustCompile(`\S+@\S+\.\S+`)
 
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")

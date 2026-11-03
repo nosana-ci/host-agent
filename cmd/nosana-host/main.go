@@ -4,6 +4,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,10 +12,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
+	"unsafe"
 
 	"github.com/nosana-ci/host-agent/internal/api"
 	"github.com/nosana-ci/host-agent/internal/config"
@@ -37,6 +40,7 @@ Usage:
   nosana-host doctor [--fix ID]         run the host checks; --fix applies the fix of one check
   nosana-host node start|stop|restart   the node container; a stopped node stays stopped until started
   nosana-host update                    install the current release now, also while the node is busy
+  nosana-host register [--email E] [--discord D] [--twitter T] [--accept-agreement]   the node's contact details; asks on a terminal
   nosana-host daemon                    run the agent (what the service runs)
   nosana-host version
 `
@@ -68,6 +72,8 @@ func main() {
 		err = cmdDoctor(os.Args[2:])
 	case "node":
 		err = cmdNode(os.Args[2:])
+	case "register":
+		err = cmdRegister(os.Args[2:])
 	case "update":
 		fmt.Println("checking the release; a download can take a few minutes")
 		err = cmdCommand("update")
@@ -233,10 +239,64 @@ func cmdNode(args []string) error {
 	return cmdCommand(args[0] + "-node")
 }
 
+// agreementURL is the Participation Agreement the node asks a host to accept on its first start.
+const agreementURL = "https://drive.google.com/file/d/1dFWCT5Zon08pCPrftdxB9ByvbuDafTwy/view"
+
+// cmdRegister registers the node with the contact details the node would ask on its terminal and
+// the owner's acceptance of the Participation Agreement. Flags it does not get it asks for when
+// stdin is a terminal.
+func cmdRegister(args []string) error {
+	fs := flag.NewFlagSet("register", flag.ExitOnError)
+	email := fs.String("email", "", "where Nosana can reach you about this node")
+	discord := fs.String("discord", "", "your Discord username (optional)")
+	twitter := fs.String("twitter", "", "your Twitter username (optional)")
+	accept := fs.Bool("accept-agreement", false, "you read the Participation Agreement and agree to its terms")
+	_ = fs.Parse(args)
+	in := bufio.NewReader(os.Stdin)
+	if isTerminal(os.Stdin) {
+		if *email == "" {
+			*email = ask(in, "Email: ")
+			*discord = ask(in, "Discord username (optional): ")
+			*twitter = ask(in, "Twitter username (optional): ")
+		}
+		if !*accept {
+			fmt.Println("Participation Agreement: " + agreementURL)
+			*accept = strings.EqualFold(ask(in, "Have you read it, and do you agree to its terms? [y/N] "), "y")
+		}
+	}
+	if *email == "" {
+		return errors.New("usage: nosana-host register --email ADDRESS [--discord NAME] [--twitter NAME] --accept-agreement")
+	}
+	if !*accept {
+		return errors.New("the Participation Agreement has to be accepted: " + agreementURL)
+	}
+	q := url.Values{"email": {*email}, "discord": {*discord}, "twitter": {*twitter}, "accept": {"1"}}
+	return result("/register?" + q.Encode())
+}
+
+// isTerminal reports whether f is a terminal (a TCGETS ioctl only works on one; /dev/null is a
+// character device too).
+func isTerminal(f *os.File) bool {
+	var t syscall.Termios
+	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), syscall.TCGETS, uintptr(unsafe.Pointer(&t)))
+	return errno == 0
+}
+
+func ask(in *bufio.Reader, prompt string) string {
+	fmt.Print(prompt)
+	line, _ := in.ReadString('\n')
+	return strings.TrimSpace(line)
+}
+
 // cmdCommand runs one of the console's commands; the agent queues it with the console's.
 func cmdCommand(verb string) error {
+	return result("/commands/" + verb)
+}
+
+// result posts to the agent and prints the message of the command result it answers with.
+func result(path string) error {
 	var r api.CommandResult
-	if err := agent(http.MethodPost, "/commands/"+verb, &r); err != nil {
+	if err := agent(http.MethodPost, path, &r); err != nil {
 		return err
 	}
 	if !r.Ok {
