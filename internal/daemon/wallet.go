@@ -57,6 +57,9 @@ func (w *walletBalance) refresh(ctx context.Context) {
 		}
 		next.Error = &msg
 	} else {
+		if w.last != nil && w.last.Error != nil {
+			slog.Info("wallet balance readable again", "sol", sol)
+		}
 		now := time.Now().UTC()
 		next.Sol, next.ReadAt = &sol, &now
 	}

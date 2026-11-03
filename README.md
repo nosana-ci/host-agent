@@ -44,8 +44,8 @@ Install script: `host-console/static/install.sh`.
   (exit 129) or with a backoff when it crashes, keeps it stopped when the owner said so, and swaps
   the image when the release changes it and the node may be interrupted (see Updates).
 - **Heartbeat.** Every 15 s: agent version and the commands it accepts, update state, node state,
-  GPU, disk, the host checks, the runtime and the node wallet's SOL balance (read from the network's
-  public RPC every minute), signed with the node wallet like every node request.
+  GPU, disk, the host checks, the runtime and the node wallet's SOL balance (read every minute from the
+  Nosana kit's default RPC: Nosana's Ironforge endpoint on mainnet, the public one on devnet), signed with the node wallet like every node request.
   Commands come back in the
   answer and through a 25 s long-poll; each is answered done or failed with a message.
 - **Commands.** `restart-node`, `stop-node`, `start-node`, `run-doctor`, `fix-check` (podman

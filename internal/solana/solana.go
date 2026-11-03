@@ -1,4 +1,4 @@
-// Package solana reads from the network's public RPC: the node wallet's SOL balance.
+// Package solana reads the node wallet's SOL balance from the network's RPC.
 package solana
 
 import (
@@ -10,12 +10,15 @@ import (
 	"net/http"
 )
 
-// RPCURL is the public RPC of the network the node runs on.
+// RPCURL is the RPC of the network the node runs on: the defaults of the Nosana kit
+// (packages/kit/src/config/defaultConfigs.ts). On mainnet that is Nosana's Ironforge endpoint,
+// whose key is public on purpose (scoped and rate limited); the public mainnet RPC refuses Go
+// clients ("Your IP or provider is blocked from this endpoint").
 func RPCURL(network string) string {
 	if network == "devnet" {
 		return "https://api.devnet.solana.com"
 	}
-	return "https://api.mainnet-beta.solana.com"
+	return "https://rpc.ironforge.network/mainnet?apiKey=01J4RYMAWZC65B6CND9DTZZ5BK"
 }
 
 // Balance is address's SOL balance at the confirmed commitment.
@@ -37,9 +40,6 @@ func Balance(ctx context.Context, url, address string) (float64, error) {
 		return 0, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("solana rpc: %s", resp.Status)
-	}
 	var out struct {
 		Result *struct {
 			Value uint64 `json:"value"`
@@ -48,11 +48,14 @@ func Balance(ctx context.Context, url, address string) (float64, error) {
 			Message string `json:"message"`
 		} `json:"error"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return 0, fmt.Errorf("solana rpc: %w", err)
-	}
-	if out.Error != nil {
+	decodeErr := json.NewDecoder(resp.Body).Decode(&out)
+	switch {
+	case out.Error != nil: // also on an HTTP error, which says why there
 		return 0, errors.New("solana rpc: " + out.Error.Message)
+	case resp.StatusCode != http.StatusOK:
+		return 0, fmt.Errorf("solana rpc: %s", resp.Status)
+	case decodeErr != nil:
+		return 0, fmt.Errorf("solana rpc: %w", decodeErr)
 	}
 	if out.Result == nil {
 		return 0, errors.New("solana rpc: no result")
