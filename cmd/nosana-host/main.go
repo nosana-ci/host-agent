@@ -34,6 +34,8 @@ Usage:
   nosana-host status                    node address, link, node and update state
   nosana-host logs [node|agent] [-f] [-n N]   the node container's log or the agent's journal
   nosana-host doctor [--fix ID]         run the host checks; --fix applies the fix of one check
+  nosana-host node start|stop|restart   the node container; a stopped node stays stopped until started
+  nosana-host update                    install the current release now, also while the node is busy
   nosana-host daemon                    run the agent (what the service runs)
   nosana-host version
 `
@@ -63,6 +65,10 @@ func main() {
 		err = cmdLogs(os.Args[2:])
 	case "doctor":
 		err = cmdDoctor(os.Args[2:])
+	case "node":
+		err = cmdNode(os.Args[2:])
+	case "update":
+		err = cmdCommand("update")
 	case "daemon":
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 		defer stop()
@@ -167,6 +173,27 @@ func cmdDoctor(args []string) error {
 		}
 	}
 	fmt.Println(doctor.Summary(checks))
+	return nil
+}
+
+// cmdNode runs the console's start-node, stop-node or restart-node.
+func cmdNode(args []string) error {
+	if len(args) != 1 || (args[0] != "start" && args[0] != "stop" && args[0] != "restart") {
+		return errors.New("usage: nosana-host node start|stop|restart")
+	}
+	return cmdCommand(args[0] + "-node")
+}
+
+// cmdCommand runs one of the console's commands; the agent queues it with the console's.
+func cmdCommand(verb string) error {
+	var r api.CommandResult
+	if err := agent(http.MethodPost, "/commands/"+verb, &r); err != nil {
+		return err
+	}
+	if !r.Ok {
+		return errors.New(r.Message)
+	}
+	fmt.Println(r.Message)
 	return nil
 }
 

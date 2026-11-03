@@ -32,10 +32,12 @@ what is missing.
 nosana-host status                 # node address, link, node and update state
 nosana-host logs [node|agent] -f   # the node container's log, or the agent's journal
 nosana-host doctor [--fix ID]      # the host checks; --fix applies the fix of one check
+nosana-host node start|stop|restart   # the node container, like the console's buttons
+nosana-host update                 # install the current release now
 sudo nosana-host uninstall [--purge]   # --purge deletes state too, after backing up the wallet into your home
 ```
 
-`status`, `logs` and `doctor` talk to the running agent over `/run/nosana/cli.sock`, which belongs
+Everything but install and uninstall talks to the running agent over `/run/nosana/cli.sock`, which belongs
 to root and the `nosana` group; the installer adds the user who ran it to that group (log in again
 once), so only install and uninstall need sudo.
 
@@ -55,7 +57,9 @@ Install script: `host-console/static/install.sh`.
   answer and through a 25 s long-poll; each is answered done or failed with a message.
 - **Commands.** `restart-node`, `stop-node`, `start-node`, `run-doctor`, `fix-check` (podman
   service restart, nftables install, nvidia-persistenced), `update` (also while the node is busy).
-  The heartbeat lists them, so the console shows what this agent can do.
+  The heartbeat lists them, so the console shows what this agent can do. The CLI's
+  `node start|stop|restart` and `update` are the same commands: they wait in the
+  same queue and run one at a time with the console's.
 
 - **Updates.** Every 10 minutes the agent reads `stable.json` from the release URL, verifies its signature with
   the release key built into it, and installs a newer agent right away: download, sha256, a

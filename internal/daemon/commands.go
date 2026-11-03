@@ -9,8 +9,9 @@ import (
 	"github.com/nosana-ci/host-agent/internal/doctor"
 )
 
-// Every command the console can send, in the order the agent advertises them. A new verb is one
-// entry here; the console shows what the heartbeat lists.
+// Every command the console can send, in the order the agent advertises them. The CLI sends the
+// same verbs over the socket. A new verb is one entry here; the console shows what the heartbeat
+// lists.
 var commands = []struct {
 	verb string
 	run  func(d *daemon, ctx context.Context, args map[string]any) (string, error)
@@ -19,7 +20,7 @@ var commands = []struct {
 		return "node restarting", d.sup.Restart()
 	}},
 	{"stop-node", func(d *daemon, _ context.Context, _ map[string]any) (string, error) {
-		return "node stopping; it stays stopped until start-node", d.sup.Stop()
+		return "node stopping; it stays stopped until it is started again", d.sup.Stop()
 	}},
 	{"start-node", func(d *daemon, _ context.Context, _ map[string]any) (string, error) {
 		return "node starting", d.sup.Start()
@@ -48,17 +49,22 @@ func verbs() []string {
 	return out
 }
 
-func (d *daemon) runCommands(ctx context.Context, cmds []api.AgentCommand) {
-	for _, c := range cmds {
-		msg, err := d.run(ctx, c)
+// job is a command and where its answer goes: host-manager for the console's, the socket for the
+// CLI's.
+type job struct {
+	api.AgentCommand
+	answer func(api.CommandResult)
+}
+
+func (d *daemon) runJobs(ctx context.Context, jobs []job) {
+	for _, j := range jobs {
+		msg, err := d.run(ctx, j.AgentCommand)
 		result := api.CommandResult{Ok: err == nil, Message: msg}
 		if err != nil {
 			result.Message = err.Error()
 		}
-		slog.Info("command", "verb", c.Verb, "ok", result.Ok, "message", result.Message)
-		if err := d.ctrl.Report(ctx, c.Id, result); err != nil {
-			slog.Warn("report command result", "id", c.Id, "err", err)
-		}
+		slog.Info("command", "verb", j.Verb, "ok", result.Ok, "message", result.Message)
+		j.answer(result)
 	}
 }
 
