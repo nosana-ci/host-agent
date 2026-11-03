@@ -34,6 +34,9 @@ const (
 	stopTimeout   = 2 * time.Minute
 	maxBackoff    = 5 * time.Minute
 	stableAfter   = 2 * time.Minute // running this long forgets earlier crashes
+	// maxWait is how long a change that stops the node waits for a node in the queue (or one
+	// whose API does not answer); jobs and benchmarks are always waited for.
+	maxWait = 24 * time.Hour
 	// exitRespawn is the node's "start me again" exit code (node/src/exitCodes.ts).
 	exitRespawn = 129
 )
@@ -52,6 +55,10 @@ type Supervisor struct {
 	restarted bool // the restart happened but the state could not record it
 	crashes   int
 	nextStart time.Time
+	swapNow   bool // the owner asked for the update: the next image swap does not wait
+
+	// WaitingForSOL reports that the node wallet is below the SOL the node waits for at start.
+	WaitingForSOL func() bool
 }
 
 func New(pc *podman.Client, st *store.Store, network string) *Supervisor {
@@ -74,18 +81,63 @@ func (s *Supervisor) Status() api.NodeStatus {
 	return s.status
 }
 
-// Busy reports whether the node may run a job or a benchmark, which updates must not interrupt.
-// A node that was not observed yet, that podman cannot report on, or that runs without answering
-// /node/info counts as busy.
-func (s *Supervisor) Busy() bool {
+// MayInterrupt reports whether a change that stops the node (a new image, a runtime switch) may
+// happen now. A job or a benchmark always waits. A place in the queue, joining a market, and a
+// running node whose API does not answer wait at most maxWait, counted from the first time a
+// change had to wait (store Update.WaitingSince). A node that waits for SOL at start has nothing
+// to lose, and neither has a node that is not running. Callers report an applied change with
+// ChangeApplied.
+func (s *Supervisor) MayInterrupt() bool {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if !s.observed || s.status.Container == "unknown" {
+	observed, status := s.observed, s.status
+	s.mu.Unlock()
+	if !observed || status.Container == "unknown" {
+		return false
+	}
+	if status.Container != "running" {
 		return true
 	}
+	state := ""
+	if status.State != nil {
+		state = *status.State
+	}
+	switch state {
+	case "RUNNING_JOB", "BENCHMARKING":
+		s.waitingSince()
+		return false
+	case "", "QUEUED", "JOINING_MARKET":
+		if state == "" && s.WaitingForSOL != nil && s.WaitingForSOL() {
+			return true
+		}
+		return time.Since(s.waitingSince()) >= maxWait
+	}
+	return true
+}
 
-	status := s.status
-	return status.Container == "running" && (status.State == nil || *status.State == "RUNNING_JOB" || *status.State == "BENCHMARKING")
+// waitingSince is when a change first waited for the node, recording now if none did.
+func (s *Supervisor) waitingSince() time.Time {
+	if w := s.st.State().Update.WaitingSince; w != nil {
+		return *w
+	}
+	now := time.Now().UTC()
+	_ = s.st.Update(func(st *store.State) { st.Update.WaitingSince = &now })
+	return now
+}
+
+// ChangeApplied ends the wait MayInterrupt counts.
+func (s *Supervisor) ChangeApplied() {
+	s.mu.Lock()
+	s.swapNow = false
+	s.mu.Unlock()
+	_ = s.st.Update(func(st *store.State) { st.Update.WaitingSince = nil })
+}
+
+// SwapNow lets the next image swap happen without waiting for the node (the update command).
+func (s *Supervisor) SwapNow() {
+	s.mu.Lock()
+	s.swapNow = true
+	s.mu.Unlock()
+	s.poke()
 }
 
 func (s *Supervisor) Start() error   { return s.want(false, false) }
@@ -164,7 +216,7 @@ func (s *Supervisor) reconcile(ctx context.Context) error {
 	defer cancel()
 	state := s.st.State()
 	s.mu.Lock()
-	image, restart := s.image, state.NodeRestart && !s.restarted
+	image, restart, swapNow := s.image, state.NodeRestart && !s.restarted, s.swapNow
 	s.status.Desired = desired(state)
 	s.mu.Unlock()
 
@@ -182,6 +234,11 @@ func (s *Supervisor) reconcile(ctx context.Context) error {
 		return err
 	}
 	defer func() { s.observe(ctr, image) }()
+	if swapNow && ctr != nil && ctr.Config.Labels[LabelImage] == image && ctr.Config.Labels[labelNetwork] == s.network {
+		s.mu.Lock()
+		s.swapNow = false // nothing to swap: a later release waits as usual
+		s.mu.Unlock()
+	}
 
 	switch {
 	case state.NodeStopped:
@@ -203,7 +260,7 @@ func (s *Supervisor) reconcile(ctx context.Context) error {
 		s.restartDone() // only once it happened; podman may have been away
 		return s.pc.StartContainer(ctx, ContainerName)
 
-	case image != "" && (ctr.Config.Labels[LabelImage] != image || ctr.Config.Labels[labelNetwork] != s.network) && !s.Busy():
+	case image != "" && (ctr.Config.Labels[LabelImage] != image || ctr.Config.Labels[labelNetwork] != s.network) && (swapNow || s.MayInterrupt()):
 		pulled, err := s.ensureImage(ctx, image) // the node keeps running during the pull
 		if err != nil || pulled {
 			return err // the swap waits for the next tick, which asks again whether the node is idle
@@ -212,6 +269,7 @@ func (s *Supervisor) reconcile(ctx context.Context) error {
 		if err := s.pc.RemoveContainer(ctx, ContainerName); err != nil {
 			return err
 		}
+		s.ChangeApplied()
 		return s.create(ctx, image)
 	case ctr.State.Running:
 		s.mu.Lock()

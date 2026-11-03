@@ -42,9 +42,10 @@ Install script: `host-console/public/install.sh`.
   release names (`start --network <network>`, the node directory at `/root/.nosana`, the podman
   socket next to it, port 5001 on `127.0.0.1:15001` for `/node/info`), restarts it when it asks
   (exit 129) or with a backoff when it crashes, keeps it stopped when the owner said so, and swaps
-  the image when the release changes it and the node is idle.
+  the image when the release changes it and the node may be interrupted (see Updates).
 - **Heartbeat.** Every 15 s: agent version and the commands it accepts, update state, node state,
-  GPU, disk, the host checks and the runtime, signed with the node wallet like every node request.
+  GPU, disk, the host checks, the runtime and the node wallet's SOL balance (read from the network's
+  public RPC every minute), signed with the node wallet like every node request.
   Commands come back in the
   answer and through a 25 s long-poll; each is answered done or failed with a message.
 - **Commands.** `restart-node`, `stop-node`, `start-node`, `run-doctor`, `fix-check` (podman
@@ -52,10 +53,12 @@ Install script: `host-console/public/install.sh`.
   The heartbeat lists them, so the console shows what this agent can do.
 
 - **Updates.** Every 10 minutes the agent reads `stable.json` from the release URL, verifies its signature with
-  the release key built into it, and when the node is idle: switches the runtime bundle (and goes
-  back when podman does not come up within 45 s), swaps the node image, and installs a newer agent:
-  download, sha256, a `version` run, then `bin/current` is relinked and the process execs the new
-  binary in place; the node keeps running. The new version is kept once it has been up for two
+  the release key built into it, and installs a newer agent right away: download, sha256, a
+  `version` run, then `bin/current` is relinked and the process execs the new binary in place; the
+  node keeps running. A new runtime bundle (switched back when podman does not come up within 45 s)
+  and a new node image stop the node, so they wait: always for a job or a benchmark, at most 24 h
+  for a node in the queue, joining a market, or running without answering `/node/info`, and not at
+  all for a node waiting for SOL or not running. `update` from the console applies them at once. The new version is kept once it has been up for two
   minutes; three failed starts before that roll back to the previous binary and block that version
   on this host.
 - **Offline.** When host-manager is away the node keeps running and heartbeats retry with a backoff

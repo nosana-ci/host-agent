@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"sync"
+	"time"
 )
 
 // State is what the agent remembers between runs, in agent/state.json.
@@ -25,6 +26,9 @@ type Update struct {
 	Blocked        []string `json:"blocked,omitempty"`
 	BlockedRuntime []string `json:"blockedRuntime,omitempty"`
 	LastRollback   string   `json:"lastRollback,omitempty"`
+	// WaitingSince is when a change that stops the node (a new image, a runtime switch) first had
+	// to wait for it; cleared once such a change is applied.
+	WaitingSince *time.Time `json:"waitingSince,omitempty"`
 }
 
 // Pending is an agent version that was switched to but has not stayed up long enough yet.
