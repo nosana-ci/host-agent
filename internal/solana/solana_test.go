@@ -31,6 +31,18 @@ func TestBalance(t *testing.T) {
 	}
 }
 
+func TestBalanceRefusedSaysWhy(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","error":{"code":403,"message":"Your IP or provider is blocked from this endpoint"},"id":1}`))
+	}))
+	defer srv.Close()
+	_, err := Balance(context.Background(), srv.URL, "Addr")
+	if err == nil || err.Error() != "solana rpc: Your IP or provider is blocked from this endpoint" {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestBalanceRPCError(t *testing.T) {
 	_, err := Balance(context.Background(), rpc(t, `{"jsonrpc":"2.0","error":{"code":-32602,"message":"Invalid param"},"id":1}`), "Addr")
 	if err == nil || err.Error() != "solana rpc: Invalid param" {
