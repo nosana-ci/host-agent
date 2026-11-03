@@ -61,13 +61,16 @@ func Client() *http.Client {
 	}}
 }
 
+// ErrNotRunning is Explain's answer when nothing listens on the socket.
+var ErrNotRunning = errors.New("the agent is not running: systemctl status nosana-host")
+
 // Explain turns a connection error into what the user should do.
 func Explain(err error) error {
 	switch {
 	case errors.Is(err, fs.ErrPermission):
 		return fmt.Errorf("the CLI is for root and the %s group; log in again if the install just added you, or use sudo", Group)
 	case errors.Is(err, fs.ErrNotExist), errors.Is(err, syscall.ECONNREFUSED):
-		return errors.New("the agent is not running: systemctl status nosana-host")
+		return ErrNotRunning
 	}
 	return err
 }

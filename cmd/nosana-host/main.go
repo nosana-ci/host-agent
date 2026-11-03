@@ -21,7 +21,9 @@ import (
 	"github.com/nosana-ci/host-agent/internal/daemon"
 	"github.com/nosana-ci/host-agent/internal/doctor"
 	"github.com/nosana-ci/host-agent/internal/install"
+	"github.com/nosana-ci/host-agent/internal/keys"
 	"github.com/nosana-ci/host-agent/internal/local"
+	"github.com/nosana-ci/host-agent/internal/store"
 	"github.com/nosana-ci/host-agent/internal/version"
 )
 
@@ -97,16 +99,15 @@ func cmdInstall(args []string) error {
 
 func cmdStatus() error {
 	var s local.Status
-	if err := agent(http.MethodGet, "/status", &s); err != nil {
+	err := agent(http.MethodGet, "/status", &s)
+	if errors.Is(err, local.ErrNotRunning) {
+		statusFromFiles()
+	}
+	if err != nil {
 		return err
 	}
-	linked := "no; run the install command from the console"
-	switch {
-	case s.Claimed:
-		linked = "yes"
-	case s.ClaimPending:
-		linked = "not yet; the agent is claiming the host"
-	}
+	fmt.Printf("agent        %s\nhost-manager %s (%s)\nnode address %s\nlinked       %s\n",
+		s.Agent, s.ControlURL, s.Network, s.NodeAddress, linked(s.Claimed, s.ClaimPending))
 
 	n := s.Status.Node
 	nodeLine := n.Container + " (" + n.Image + ")"
@@ -130,12 +131,48 @@ func cmdStatus() error {
 	if u.Detail != nil {
 		update += ": " + *u.Detail
 	}
-	fmt.Printf("agent        %s\nhost-manager %s (%s)\nnode address %s\nlinked       %s\nnode         %s\nchecks       %s\nupdate       %s\n",
-		s.Agent, s.ControlURL, s.Network, s.NodeAddress, linked, nodeLine, doctor.Summary(s.Status.Checks), update)
+	fmt.Printf("node         %s\nchecks       %s\nupdate       %s\n", nodeLine, doctor.Summary(s.Status.Checks), update)
 	if s.LastRollback != "" {
 		fmt.Printf("rollback     %s\n", s.LastRollback)
 	}
 	return nil
+}
+
+// statusFromFiles shows, while the agent is down, what the install wrote; the link and the node
+// address only for root, as their files are root's.
+func statusFromFiles() {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Println("nosana-host is not installed")
+		return
+	}
+	fmt.Printf("host-manager %s (%s)\n", cfg.ControlURL, cfg.Network)
+	if os.Geteuid() != 0 {
+		fmt.Println("             sudo nosana-host status also shows the node address and the link")
+		return
+	}
+	if _, err := os.Stat(config.WalletPath); err == nil { // keys.Wallet would create a missing one
+		if w, err := keys.Wallet(config.WalletPath); err == nil {
+			fmt.Printf("node address %s\n", keys.Address(w))
+		}
+	}
+	if st, err := store.Open(config.StatePath); err == nil {
+		s := st.State()
+		fmt.Printf("linked       %s\n", linked(s.Claimed, s.ClaimToken != ""))
+		if s.Update.LastRollback != "" {
+			fmt.Printf("rollback     %s\n", s.Update.LastRollback)
+		}
+	}
+}
+
+func linked(claimed, pending bool) string {
+	switch {
+	case claimed:
+		return "yes"
+	case pending:
+		return "not yet; the agent is claiming the host"
+	}
+	return "no; run the install command from the console"
 }
 
 func cmdLogs(args []string) error {
