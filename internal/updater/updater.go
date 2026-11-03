@@ -25,7 +25,7 @@ import (
 
 const (
 	checkEvery = 10 * time.Minute
-	// firstCheck gives the supervisor time to see the node first; until then it counts as busy.
+	// firstCheck gives the supervisor time to see the node first; until then it is not interrupted.
 	firstCheck = 30 * time.Second
 	// keepAfter is how long a new version must stay up before it is kept; Preflight rolls back
 	// a version that fails to start three times before that.
@@ -102,8 +102,9 @@ func (u *Updater) Run(ctx context.Context) {
 	}
 }
 
-// Check reads the manifest and applies it: the node image right away, the runtime bundle and the
-// agent when the node is idle or force is set. It returns what it did, in a sentence.
+// Check reads the manifest and applies it: the agent right away (the node container keeps running
+// while the agent replaces itself), the node image and the runtime bundle once the node may be
+// interrupted (see Supervisor.MayInterrupt) or force is set. It returns what it did, in a sentence.
 func (u *Updater) Check(ctx context.Context, force bool) (string, error) {
 	if !u.apply.TryLock() {
 		return "an update is already running", nil
@@ -121,6 +122,9 @@ func (u *Updater) Check(ctx context.Context, force bool) (string, error) {
 	u.status.LatestVersion = &m.Version
 	u.mu.Unlock()
 	u.sup.SetImage(m.Node.Image)
+	if force {
+		u.sup.SwapNow()
+	}
 
 	// The runtime only moves up: a halted release must not downgrade podman under its database.
 	if cur := bundle.Current(); version.Compare(m.Runtime.Version, cur) > 0 && !slices.Contains(u.st.State().Update.BlockedRuntime, m.Runtime.Version) {
@@ -129,12 +133,13 @@ func (u *Updater) Check(ctx context.Context, force bool) (string, error) {
 		if err != nil {
 			return u.fail(err)
 		}
-		if u.sup.Busy() && !force {
-			return u.done("deferred", "runtime "+ver+" waits until the node is idle")
+		if !force && !u.sup.MayInterrupt() {
+			return u.done("deferred", "runtime "+ver+" waits until the node is between jobs")
 		}
 		if err := u.switchRuntime(ctx, ver, cur); err != nil {
 			return u.fail(err)
 		}
+		u.sup.ChangeApplied()
 	}
 	upd := u.st.State().Update
 	switch {
@@ -142,8 +147,6 @@ func (u *Updater) Check(ctx context.Context, force bool) (string, error) {
 		return u.done("idle", "agent "+version.Version+" is up to date")
 	case slices.Contains(upd.Blocked, m.Version):
 		return u.done("idle", "version "+m.Version+" failed here before and is skipped")
-	case u.sup.Busy() && !force:
-		return u.done("deferred", "update to "+m.Version+" waits until the node is idle")
 	}
 	u.set("downloading", "agent "+m.Version)
 	if err := u.installAgent(ctx, m); err != nil {

@@ -14,6 +14,9 @@ import (
 // until it holds 0.005 SOL, which only its log says; the balance lets the console tell the owner.
 const walletEvery = time.Minute
 
+// minSOL is the balance the node waits for at start (the node's NodeManager/node/balance/balanceHandler.ts).
+const minSOL = 0.005
+
 type walletBalance struct {
 	read func(ctx context.Context) (float64, error)
 
@@ -64,4 +67,12 @@ func (w *walletBalance) status() *api.WalletStatus {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.last
+}
+
+// waitingForSOL reports that the last good reading is below minSOL: the node waits at start and
+// has nothing to lose from a restart.
+func (w *walletBalance) waitingForSOL() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.last != nil && w.last.Sol != nil && *w.last.Sol < minSOL
 }

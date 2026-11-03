@@ -65,11 +65,13 @@ func Run(ctx context.Context) error {
 	}
 	pc := podman.New(config.PodmanSocket)
 	sup := node.New(pc, st, cfg.Network)
+	bal := newWalletBalance(cfg.Network, keys.Address(wallet))
+	sup.WaitingForSOL = bal.waitingForSOL
 	d := &daemon{
 		cfg: cfg, st: st, pc: pc, sup: sup,
 		upd:  updater.New(cfg, st, sup, pc),
 		ctrl: control.New(cfg.ControlURL, wallet),
-		bal:  newWalletBalance(cfg.Network, keys.Address(wallet)),
+		bal:  bal,
 		cmds: make(chan []api.AgentCommand, 16),
 		// host-manager wants arrays before the first doctor run too
 		gpu:    api.GpuStatus{Gpus: []api.Gpu{}},
