@@ -84,8 +84,8 @@ state), `keys`, `config`.
 
 ## Releases
 
-The agent is open source on GitHub (`github.com/nosana-ci/host-agent`, a mirror of the GitLab
-project), and releases are GitHub Releases there. A tag `vX.Y.Z` runs the `release` CI job:
+The agent is open source on GitHub (`github.com/nosana-ci/host-agent`), and releases are GitHub
+Releases there. A tag `vX.Y.Z` runs the release pipeline:
 `make build`, `make runtime` (the podman bundle from the GPG-verified podman-static release),
 `nosana-host-publish` (writes the manifest and signs it with `RELEASE_SIGNING_KEY`), then
 `scripts/github-release.sh` publishes the binary, the runtime bundle, `stable.json` and
