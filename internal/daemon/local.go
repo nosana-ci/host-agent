@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/nosana-ci/host-agent/internal/api"
-	"github.com/nosana-ci/host-agent/internal/doctor"
 	"github.com/nosana-ci/host-agent/internal/local"
 	"github.com/nosana-ci/host-agent/internal/node"
 	"github.com/nosana-ci/host-agent/internal/service"
@@ -62,14 +61,24 @@ func (d *daemon) localHandler() http.Handler {
 			writeJSON(w, result)
 		}
 	})
+	// A fix is the console's fix-check, queued like it; the checks it reran come back in full.
 	mux.HandleFunc("POST /doctor", func(w http.ResponseWriter, r *http.Request) {
-		if id := r.URL.Query().Get("fix"); id != "" {
-			if err := doctor.Fix(r.Context(), id); err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
+		id := r.URL.Query().Get("fix")
+		if id == "" {
+			writeJSON(w, d.runDoctor(r.Context()))
+			return
 		}
-		writeJSON(w, d.runDoctor(r.Context()))
+		result, ok := d.runQueued(r.Context(), api.AgentCommand{Verb: "fix-check", Args: map[string]any{"id": id}})
+		switch {
+		case !ok:
+		case !result.Ok:
+			http.Error(w, result.Message, http.StatusBadRequest)
+		default:
+			d.mu.Lock()
+			checks := d.checks
+			d.mu.Unlock()
+			writeJSON(w, checks)
+		}
 	})
 	mux.HandleFunc("GET /logs/{what}", func(w http.ResponseWriter, r *http.Request) {
 		tail, follow := r.URL.Query().Get("tail"), r.URL.Query().Get("follow") == "true"
