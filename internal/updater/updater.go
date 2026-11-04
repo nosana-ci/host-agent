@@ -140,6 +140,16 @@ func (u *Updater) Check(ctx context.Context, force bool) (string, error) {
 			return u.fail(err)
 		}
 		u.sup.ChangeApplied()
+	} else if cur != "" && bundle.Stale(cur) {
+		// The bundle's configuration depends on the host (the firewall driver); a new agent may
+		// choose differently. Podman reads it at start, so this is a restart like a switch.
+		if !force && !u.sup.MayInterrupt() {
+			return u.done("deferred", "runtime restart waits until the node is between jobs")
+		}
+		if err := u.reconfigureRuntime(ctx, cur); err != nil {
+			return u.fail(err)
+		}
+		u.sup.ChangeApplied()
 	}
 	upd := u.st.State().Update
 	switch {
@@ -219,6 +229,26 @@ func (u *Updater) commit() {
 	slog.Info("agent update committed", "version", version.Version, "was", binVersion(p.Previous))
 	u.st.Info("update", "agent updated to %s (was %s)", version.Version, binVersion(p.Previous))
 	u.set("idle", "")
+}
+
+// reconfigureRuntime rewrites the configuration of the running bundle ver and restarts podman on
+// it. The node is restarted too: its network rules came from the old firewall driver.
+func (u *Updater) reconfigureRuntime(ctx context.Context, ver string) error {
+	if err := bundle.Reconfigure(ver); err != nil {
+		return err
+	}
+	if err := u.activate(ctx, ver); err != nil {
+		u.st.Error("runtime", "runtime %s does not start with its new configuration: %v", ver, err)
+		return err
+	}
+	bundle.DropStaleFirewallRules()
+	slog.Info("runtime reconfigured", "version", ver, "firewall", bundle.FirewallDriver())
+	if u.st.State().NodeStopped { // a stopped node has no rules; it stays stopped
+		u.st.Info("runtime", "runtime %s reconfigured (firewall driver %s)", ver, bundle.FirewallDriver())
+		return nil
+	}
+	u.st.Info("runtime", "runtime %s reconfigured (firewall driver %s); the node is restarted", ver, bundle.FirewallDriver())
+	return u.sup.Restart()
 }
 
 // switchRuntime restarts the podman service on the installed bundle ver and goes back to the old

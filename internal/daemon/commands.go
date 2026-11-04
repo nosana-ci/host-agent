@@ -33,6 +33,11 @@ var commands = []struct {
 		if err := doctor.Fix(ctx, id); err != nil {
 			return "", err
 		}
+		if id == "firewall" { // the runtime's configuration follows the firewall tool: podman restarts on it between jobs
+			if _, err := d.upd.Check(ctx, false); err != nil {
+				slog.Warn("update check after firewall fix", "err", err)
+			}
+		}
 		return "fixed " + id + "; " + doctor.Summary(d.runDoctor(ctx)), nil
 	}},
 	{"update", func(d *daemon, ctx context.Context, _ map[string]any) (string, error) {
