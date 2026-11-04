@@ -29,7 +29,7 @@ newer), nvidia-container-toolkit and a CDI spec for the GPU; the console's healt
 what is missing.
 
 ```sh
-nosana-host status                 # node address, link, node and update state
+nosana-host status                 # what the console's host page shows: link, wallet, node, GPU, disk, checks, update
 nosana-host logs [node|agent] -f   # the node container's log, or the agent's journal
 nosana-host doctor [--fix ID]      # the host checks; --fix applies the fix of one check
 nosana-host node start|stop|restart   # the node container, like the console's buttons
@@ -41,7 +41,8 @@ sudo nosana-host uninstall [--purge]   # --purge deletes state too, after backin
 Everything but install and uninstall talks to the running agent over `/run/nosana/cli.sock`, which belongs
 to root and the `nosana` group; the installer adds the user who ran it to that group (log in again
 once), so only install and uninstall need sudo. While the agent is down, `status` shows what the
-install wrote instead (with sudo also the node address and the link).
+install wrote instead (with sudo also the node address and the link) and `logs agent` reads the
+journal directly.
 
 Install script: `host-console/static/install.sh`.
 

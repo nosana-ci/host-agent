@@ -8,7 +8,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
@@ -116,17 +115,7 @@ func (d *daemon) localHandler() http.Handler {
 		case "node":
 			err = d.pc.Logs(r.Context(), node.ContainerName, tail, follow, out)
 		case "agent":
-			lines := "all"
-			if tail > 0 {
-				lines = strconv.Itoa(tail)
-			}
-			args := []string{"-u", service.AgentUnit, "--no-pager", "-n", lines}
-			if follow {
-				args = append(args, "-f")
-			}
-			cmd := exec.CommandContext(r.Context(), "journalctl", args...)
-			cmd.Stdout, cmd.Stderr = out, out
-			err = cmd.Run()
+			err = service.Journal(r.Context(), tail, follow, out)
 		default:
 			http.NotFound(w, r)
 			return
@@ -171,5 +160,3 @@ func (f flushWriter) Write(p []byte) (int, error) {
 	_ = http.NewResponseController(f.w).Flush()
 	return n, err
 }
-
-var _ io.Writer = flushWriter{}

@@ -1,17 +1,19 @@
-// Package local is the agent's socket for the CLI: status, logs and the doctor without sudo, for
-// root and the members of the nosana group.
+// Package local is the agent's socket for the CLI, for root and the members of the nosana group:
+// the agent serves it, and the CLI's commands call it.
 package local
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net"
 	"net/http"
 	"os"
 	"os/user"
 	"strconv"
+	"strings"
 	"syscall"
 
 	"github.com/nosana-ci/host-agent/internal/api"
@@ -52,20 +54,33 @@ func Listen() (net.Listener, error) {
 	return l, os.Chmod(SocketPath, 0o660)
 }
 
-// Client talks to the agent over the socket; the URL host is ignored.
-func Client() *http.Client {
-	return &http.Client{Transport: &http.Transport{
-		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			return (&net.Dialer{}).DialContext(ctx, "unix", SocketPath)
-		},
-	}}
-}
-
-// ErrNotRunning is Explain's answer when nothing listens on the socket.
+// ErrNotRunning is Call's error when nothing listens on the socket.
 var ErrNotRunning = errors.New("the agent is not running: systemctl status nosana-host")
 
-// Explain turns a connection error into what the user should do.
-func Explain(err error) error {
+var client = &http.Client{Transport: &http.Transport{
+	DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "unix", SocketPath)
+	},
+}}
+
+// Call sends a request to the running agent over its socket and returns the answer's body, or
+// the agent's error message; the caller closes the body.
+func Call(ctx context.Context, method, path string) (io.ReadCloser, error) {
+	req, _ := http.NewRequestWithContext(ctx, method, "http://agent"+path, nil)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, explain(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		defer resp.Body.Close()
+		msg, _ := io.ReadAll(resp.Body)
+		return nil, errors.New(strings.TrimSpace(string(msg)))
+	}
+	return resp.Body, nil
+}
+
+// explain turns a connection error into what the user should do.
+func explain(err error) error {
 	switch {
 	case errors.Is(err, fs.ErrPermission):
 		return fmt.Errorf("the CLI is for root and the %s group; log in again if the install just added you, or use sudo", Group)

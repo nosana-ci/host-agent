@@ -17,7 +17,6 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
-	"unsafe"
 
 	"github.com/nosana-ci/host-agent/internal/api"
 	"github.com/nosana-ci/host-agent/internal/config"
@@ -26,6 +25,7 @@ import (
 	"github.com/nosana-ci/host-agent/internal/install"
 	"github.com/nosana-ci/host-agent/internal/keys"
 	"github.com/nosana-ci/host-agent/internal/local"
+	"github.com/nosana-ci/host-agent/internal/service"
 	"github.com/nosana-ci/host-agent/internal/store"
 	"github.com/nosana-ci/host-agent/internal/version"
 )
@@ -35,7 +35,7 @@ const usage = `nosana-host runs the Nosana node on this machine and reports to h
 Usage:
   nosana-host install --control-url URL --release-url URL --network mainnet|devnet [--token T]   install or repair (sudo)
   nosana-host uninstall [--purge]       remove the services; --purge also deletes state after backing the wallet up (sudo)
-  nosana-host status                    node address, link, node and update state
+  nosana-host status                    link, wallet, node, GPU, disk, checks and update state
   nosana-host logs [node|agent] [-f] [-n N]   the node container's log or the agent's journal
   nosana-host doctor [--fix ID]         run the host checks; --fix applies the fix of one check
   nosana-host node start|stop|restart   the node container; a stopped node stays stopped until started
@@ -104,6 +104,8 @@ func cmdInstall(args []string) error {
 	return install.Run(context.Background(), cfg, *token, os.Stdout)
 }
 
+// cmdStatus shows what the console's host page shows, a row per item; a row with an empty label
+// continues the one above.
 func cmdStatus() error {
 	var s local.Status
 	err := agent(http.MethodGet, "/status", &s)
@@ -113,24 +115,38 @@ func cmdStatus() error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("agent        %s\nhost-manager %s (%s)\nnode address %s\nlinked       %s\n",
-		s.Agent, s.ControlURL, s.Network, s.NodeAddress, linked(s.Claimed, s.ClaimPending))
+	st := s.Status
+	row("agent", s.Agent)
+	row("host-manager", s.ControlURL+" ("+s.Network+")")
+	row("node address", s.NodeAddress)
+	row("linked", linked(s.Claimed, s.ClaimPending))
+	row("wallet", walletLine(st.Wallet))
 
-	n := s.Status.Node
-	nodeLine := n.Container + " (" + n.Image + ")"
+	n := st.Node
+	node := n.Container + " (" + n.Image + ")"
 	if n.State != nil {
-		nodeLine += ", reports " + *n.State
+		node += ", reports " + *n.State
 	}
+	row("node", node)
 	if n.Desired == api.Stopped {
-		nodeLine += "\n             stopped by the owner; nosana-host node start runs it again"
+		row("", "stopped by the owner; nosana-host node start runs it again")
 	}
 	if n.Restarts > 0 {
-		nodeLine += fmt.Sprintf("\n             %d restarts after crashes", n.Restarts)
+		row("", fmt.Sprintf("%d restarts after crashes", n.Restarts))
 	}
 	if n.LastError != nil {
-		nodeLine += "\n             last error: " + *n.LastError
+		row("", "last error: "+*n.LastError)
 	}
-	u := s.Status.Agent.Update
+
+	row("gpu", gpuLine(st.Gpu))
+	runtime := "podman not answering"
+	if st.Runtime.PodmanVersion != nil {
+		runtime = "podman " + *st.Runtime.PodmanVersion
+	}
+	row("runtime", runtime)
+	row("disk", fmt.Sprintf("%.0f GB free of %.0f GB on %s", st.Disk.FreeGb, st.Disk.TotalGb, st.Disk.Mount))
+	row("checks", doctor.Summary(st.Checks))
+	u := st.Agent.Update
 	update := u.State
 	if u.LatestVersion != nil {
 		update += ", latest " + *u.LatestVersion
@@ -138,11 +154,47 @@ func cmdStatus() error {
 	if u.Detail != nil {
 		update += ": " + *u.Detail
 	}
-	fmt.Printf("node         %s\nchecks       %s\nupdate       %s\n", nodeLine, doctor.Summary(s.Status.Checks), update)
+	row("update", update)
 	if s.LastRollback != "" {
-		fmt.Printf("rollback     %s\n", s.LastRollback)
+		row("rollback", s.LastRollback)
 	}
 	return nil
+}
+
+func row(label, value string) {
+	fmt.Printf("%-12s %s\n", label, value)
+}
+
+func walletLine(w *api.WalletStatus) string {
+	switch {
+	case w == nil || w.Sol == nil && w.Error == nil:
+		return "balance not read yet"
+	case w.Sol == nil:
+		return "balance unknown: " + *w.Error
+	}
+	line := fmt.Sprintf("%.4f SOL", *w.Sol)
+	if *w.Sol < daemon.MinSOL {
+		line += fmt.Sprintf("; the node needs %v SOL to start", daemon.MinSOL)
+	}
+	if w.Error != nil {
+		line += " (the last read failed: " + *w.Error + ")"
+	}
+	return line
+}
+
+func gpuLine(g api.GpuStatus) string {
+	if !g.Detected {
+		return "none detected"
+	}
+	names := make([]string, 0, len(g.Gpus))
+	for _, gpu := range g.Gpus {
+		names = append(names, fmt.Sprintf("%s (%d GB)", gpu.Name, gpu.MemoryMb/1024))
+	}
+	line := strings.Join(names, ", ")
+	if g.Driver != nil {
+		line += ", driver " + *g.Driver
+	}
+	return line
 }
 
 // statusFromFiles shows, while the agent is down, what the install wrote; the link and the node
@@ -153,21 +205,21 @@ func statusFromFiles() {
 		fmt.Println("nosana-host is not installed")
 		return
 	}
-	fmt.Printf("host-manager %s (%s)\n", cfg.ControlURL, cfg.Network)
+	row("host-manager", cfg.ControlURL+" ("+cfg.Network+")")
 	if os.Geteuid() != 0 {
-		fmt.Println("             sudo nosana-host status also shows the node address and the link")
+		row("", "sudo nosana-host status also shows the node address and the link")
 		return
 	}
 	if _, err := os.Stat(config.WalletPath); err == nil { // keys.Wallet would create a missing one
 		if w, err := keys.Wallet(config.WalletPath); err == nil {
-			fmt.Printf("node address %s\n", keys.Address(w))
+			row("node address", keys.Address(w))
 		}
 	}
 	if st, err := store.Open(config.StatePath); err == nil {
 		s := st.State()
-		fmt.Printf("linked       %s\n", linked(s.Claimed, s.ClaimToken != ""))
+		row("linked", linked(s.Claimed, s.ClaimToken != ""))
 		if s.Update.LastRollback != "" {
-			fmt.Printf("rollback     %s\n", s.Update.LastRollback)
+			row("rollback", s.Update.LastRollback)
 		}
 	}
 }
@@ -193,12 +245,16 @@ func cmdLogs(args []string) error {
 	_ = fs.Parse(args)
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	body, err := call(ctx, http.MethodGet, fmt.Sprintf("/logs/%s?tail=%d&follow=%t", what, *tail, *follow))
-	if err != nil {
+	body, err := local.Call(ctx, http.MethodGet, fmt.Sprintf("/logs/%s?tail=%d&follow=%t", what, *tail, *follow))
+	switch {
+	case errors.Is(err, local.ErrNotRunning) && what == "agent": // the journal says why it is down
+		err = service.Journal(ctx, *tail, *follow, os.Stdout)
+	case err != nil:
 		return err
+	default:
+		defer body.Close()
+		_, err = io.Copy(os.Stdout, body)
 	}
-	defer body.Close()
-	_, err = io.Copy(os.Stdout, body)
 	if ctx.Err() != nil {
 		return nil
 	}
@@ -210,7 +266,7 @@ func cmdDoctor(args []string) error {
 	fix := fs.String("fix", "", "apply the fix of this check")
 	_ = fs.Parse(args)
 	var checks []api.Check
-	if err := agent(http.MethodPost, "/doctor?fix="+*fix, &checks); err != nil {
+	if err := agent(http.MethodPost, "/doctor?"+url.Values{"fix": {*fix}}.Encode(), &checks); err != nil {
 		return err
 	}
 	for _, c := range checks {
@@ -274,12 +330,9 @@ func cmdRegister(args []string) error {
 	return result("/register?" + q.Encode())
 }
 
-// isTerminal reports whether f is a terminal (a TCGETS ioctl only works on one; /dev/null is a
-// character device too).
 func isTerminal(f *os.File) bool {
-	var t syscall.Termios
-	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), syscall.TCGETS, uintptr(unsafe.Pointer(&t)))
-	return errno == 0
+	fi, err := f.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }
 
 func ask(in *bufio.Reader, prompt string) string {
@@ -308,26 +361,10 @@ func result(path string) error {
 
 // agent calls the running agent and decodes its JSON answer into out.
 func agent(method, path string, out any) error {
-	body, err := call(context.Background(), method, path)
+	body, err := local.Call(context.Background(), method, path)
 	if err != nil {
 		return err
 	}
 	defer body.Close()
 	return json.NewDecoder(body).Decode(out)
-}
-
-// call sends a request to the running agent over its socket and returns the answer's body, or the
-// agent's error message; the caller closes the body.
-func call(ctx context.Context, method, path string) (io.ReadCloser, error) {
-	req, _ := http.NewRequestWithContext(ctx, method, "http://agent"+path, nil)
-	resp, err := local.Client().Do(req)
-	if err != nil {
-		return nil, local.Explain(err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		defer resp.Body.Close()
-		msg, _ := io.ReadAll(resp.Body)
-		return nil, errors.New(strings.TrimSpace(string(msg)))
-	}
-	return resp.Body, nil
 }
