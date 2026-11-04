@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+
+	"github.com/nosana-ci/host-agent/internal/api"
 )
 
 const (
@@ -18,6 +20,9 @@ type Config struct {
 	ControlURL string `json:"controlUrl"` // host-manager
 	ReleaseURL string `json:"releaseUrl"` // where stable.json and stable.json.sig live
 	Network    string `json:"network"`    // mainnet | devnet
+	// AutoUpdate unset means on: the agent installs new releases by itself. Off, it only reports
+	// them, and the owner installs one with nosana-host update or the console.
+	AutoUpdate *bool `json:"autoUpdate,omitempty"`
 }
 
 func Load() (Config, error) {
@@ -28,6 +33,24 @@ func Load() (Config, error) {
 	}
 	return c, json.Unmarshal(raw, &c)
 }
+
+// Save writes the config file; the directory exists since the install.
+func Save(c Config) error {
+	raw, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := Path + ".tmp"
+	if err := os.WriteFile(tmp, append(raw, '\n'), 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, Path)
+}
+
+func (c Config) AutoUpdateOn() bool { return c.AutoUpdate == nil || *c.AutoUpdate }
+
+// Settings is what the owner may change while the agent runs, as the heartbeat reports it.
+func (c Config) Settings() api.AgentSettings { return api.AgentSettings{AutoUpdate: c.AutoUpdateOn()} }
 
 var (
 	AgentDir      = filepath.Join(StateDir, "agent")

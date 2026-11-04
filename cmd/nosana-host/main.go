@@ -17,6 +17,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/nosana-ci/host-agent/internal/api"
 	"github.com/nosana-ci/host-agent/internal/config"
@@ -25,6 +26,8 @@ import (
 	"github.com/nosana-ci/host-agent/internal/install"
 	"github.com/nosana-ci/host-agent/internal/keys"
 	"github.com/nosana-ci/host-agent/internal/local"
+	"github.com/nosana-ci/host-agent/internal/node"
+	"github.com/nosana-ci/host-agent/internal/podman"
 	"github.com/nosana-ci/host-agent/internal/service"
 	"github.com/nosana-ci/host-agent/internal/store"
 	"github.com/nosana-ci/host-agent/internal/version"
@@ -36,11 +39,13 @@ Usage:
   nosana-host install --control-url URL --release-url URL --network mainnet|devnet [--token T]   install or repair (sudo)
   nosana-host uninstall [--purge]       remove the services; --purge also deletes state after backing the wallet up (sudo)
   nosana-host status                    link, wallet, node, GPU, disk, checks and update state
-  nosana-host logs [node|agent] [-f] [-n N]   the node container's log or the agent's journal
-  nosana-host doctor [--fix ID]         run the host checks; --fix applies the fix of one check
+  nosana-host logs [node|agent|podman|job ID] [-f] [-n N]   the node container's log, a journal, or a job's container
+  nosana-host doctor [--fix ID|all] [--yes]   run the host checks; --fix applies the fix of one check, or of every check that has one
   nosana-host node start|stop|restart   the node container; a stopped node stays stopped until started
-  nosana-host update                    install the current release now, also while the node is busy
-  nosana-host register [--email E] [--discord D] [--twitter T] [--accept-agreement]   the node's contact details; asks on a terminal
+  nosana-host update [--check]          install the current release now, also while the node is busy; --check only looks
+  nosana-host config [get KEY | set KEY on|off]   the settings (auto-update) and the install's values
+  nosana-host register [--show] [--email E] [--discord D] [--twitter T] [--accept-agreement]   the node's contact details; asks on a terminal
+  nosana-host airdrop                   ask the devnet faucet for SOL (devnet only)
   nosana-host daemon                    run the agent (what the service runs)
   nosana-host version
 `
@@ -75,8 +80,11 @@ func main() {
 	case "register":
 		err = cmdRegister(os.Args[2:])
 	case "update":
-		fmt.Println("checking the release; a download can take a few minutes")
-		err = cmdCommand("update")
+		err = cmdUpdate(os.Args[2:])
+	case "config":
+		err = cmdConfig(os.Args[2:])
+	case "airdrop":
+		err = cmdCommand("request-airdrop")
 	case "daemon":
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 		defer stop()
@@ -108,7 +116,7 @@ func cmdInstall(args []string) error {
 // continues the one above.
 func cmdStatus() error {
 	var s local.Status
-	err := agent(http.MethodGet, "/status", &s)
+	err := agent(http.MethodGet, "/status", nil, &s)
 	if errors.Is(err, local.ErrNotRunning) {
 		statusFromFiles()
 	}
@@ -117,7 +125,8 @@ func cmdStatus() error {
 	}
 	st := s.Status
 	row("agent", s.Agent)
-	row("host-manager", s.ControlURL+" ("+s.Network+")")
+	row("network", s.Network)
+	row("host-manager", s.ControlURL)
 	row("node address", s.NodeAddress)
 	row("linked", linked(s.Claimed, s.ClaimPending))
 	row("wallet", walletLine(st.Wallet))
@@ -146,19 +155,43 @@ func cmdStatus() error {
 	row("runtime", runtime)
 	row("disk", fmt.Sprintf("%.0f GB free of %.0f GB on %s", st.Disk.FreeGb, st.Disk.TotalGb, st.Disk.Mount))
 	row("checks", doctor.Summary(st.Checks))
-	u := st.Agent.Update
-	update := u.State
-	if u.LatestVersion != nil {
-		update += ", latest " + *u.LatestVersion
-	}
-	if u.Detail != nil {
-		update += ": " + *u.Detail
-	}
-	row("update", update)
+	row("update", updateLine(st.Agent))
 	if s.LastRollback != "" {
 		row("rollback", s.LastRollback)
 	}
 	return nil
+}
+
+func updateLine(a api.AgentInfo) string {
+	u := a.Update
+	line := u.State
+	if u.LatestVersion != nil {
+		line += ", newest " + *u.LatestVersion
+	}
+	if u.CheckedAt != nil {
+		line += ", checked " + ago(*u.CheckedAt)
+	}
+	if u.Detail != nil {
+		line += ": " + *u.Detail
+	}
+	if a.Settings != nil && !a.Settings.AutoUpdate {
+		line += " (auto-update off)"
+	}
+	return line
+}
+
+// ago says how long ago t was, in the coarse way a status line needs.
+func ago(t time.Time) string {
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%d min ago", int(d.Minutes()))
+	case d < 48*time.Hour:
+		return fmt.Sprintf("%d h ago", int(d.Hours()))
+	}
+	return fmt.Sprintf("%d days ago", int(d.Hours()/24))
 }
 
 func row(label, value string) {
@@ -173,6 +206,9 @@ func walletLine(w *api.WalletStatus) string {
 		return "balance unknown: " + *w.Error
 	}
 	line := fmt.Sprintf("%.4f SOL", *w.Sol)
+	if w.Nos != nil {
+		line += fmt.Sprintf(", %.2f NOS", *w.Nos)
+	}
 	if *w.Sol < daemon.MinSOL {
 		line += fmt.Sprintf("; the node needs %v SOL to start", daemon.MinSOL)
 	}
@@ -205,7 +241,8 @@ func statusFromFiles() {
 		fmt.Println("nosana-host is not installed")
 		return
 	}
-	row("host-manager", cfg.ControlURL+" ("+cfg.Network+")")
+	row("network", cfg.Network)
+	row("host-manager", cfg.ControlURL)
 	if os.Geteuid() != 0 {
 		row("", "sudo nosana-host status also shows the node address and the link")
 		return
@@ -234,21 +271,37 @@ func linked(claimed, pending bool) string {
 	return "no; run the install command from the console"
 }
 
+// cmdLogs streams a log through the agent. While the agent is down, a journal is read directly,
+// and a container's log from podman's socket, which is root's.
 func cmdLogs(args []string) error {
 	fs := flag.NewFlagSet("logs", flag.ExitOnError)
 	follow := fs.Bool("f", false, "keep following")
 	tail := fs.Int("n", 100, "lines to show first; 0 for all")
-	what := "node"
+	what, path := "node", "/logs/node"
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		what, args = args[0], args[1:]
+		path = "/logs/" + what
+		if what == "job" {
+			if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+				return errors.New("usage: nosana-host logs job ID")
+			}
+			path, args = "/logs/job/"+url.PathEscape(args[0]), args[1:]
+		}
 	}
 	_ = fs.Parse(args)
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	body, err := local.Call(ctx, http.MethodGet, fmt.Sprintf("/logs/%s?tail=%d&follow=%t", what, *tail, *follow))
+	body, err := local.Call(ctx, http.MethodGet, fmt.Sprintf("%s?tail=%d&follow=%t", path, *tail, *follow), nil)
 	switch {
 	case errors.Is(err, local.ErrNotRunning) && what == "agent": // the journal says why it is down
-		err = service.Journal(ctx, *tail, *follow, os.Stdout)
+		err = service.Journal(ctx, service.AgentUnit, *tail, *follow, os.Stdout)
+	case errors.Is(err, local.ErrNotRunning) && what == "podman":
+		err = service.Journal(ctx, service.PodmanUnit, *tail, *follow, os.Stdout)
+	case errors.Is(err, local.ErrNotRunning) && what == "node":
+		err = podman.New(config.PodmanSocket).Logs(ctx, node.ContainerName, *tail, *follow, os.Stdout)
+		if errors.Is(err, os.ErrPermission) {
+			err = errors.New("the agent is not running; podman's socket is root's: sudo nosana-host logs node")
+		}
 	case err != nil:
 		return err
 	default:
@@ -261,14 +314,48 @@ func cmdLogs(args []string) error {
 	return err
 }
 
+// cmdDoctor runs the checks; --fix ID applies one fix, --fix all every fix there is, after a
+// question on a terminal (--yes answers it).
 func cmdDoctor(args []string) error {
 	fs := flag.NewFlagSet("doctor", flag.ExitOnError)
-	fix := fs.String("fix", "", "apply the fix of this check")
+	fix := fs.String("fix", "", "apply the fix of this check, or of all")
+	yes := fs.Bool("yes", false, "apply the fixes without asking")
 	_ = fs.Parse(args)
 	var checks []api.Check
-	if err := agent(http.MethodPost, "/doctor?"+url.Values{"fix": {*fix}}.Encode(), &checks); err != nil {
+	if *fix == "all" {
+		if err := agent(http.MethodPost, "/doctor", nil, &checks); err != nil {
+			return err
+		}
+		printChecks(checks)
+		ids := fixable(checks)
+		if len(ids) == 0 {
+			fmt.Println("nothing to fix")
+			return nil
+		}
+		fmt.Printf("%d fixes to apply: %s\n", len(ids), strings.Join(ids, ", "))
+		if !*yes {
+			if !isTerminal(os.Stdin) {
+				return errors.New("add --yes to apply them without a terminal")
+			}
+			if !strings.EqualFold(ask(bufio.NewReader(os.Stdin), "Apply them? [y/N] "), "y") {
+				return nil
+			}
+		}
+		for _, id := range ids {
+			fmt.Println("fixing " + id)
+			if err := agent(http.MethodPost, "/doctor?"+url.Values{"fix": {id}}.Encode(), nil, &checks); err != nil {
+				fmt.Println("  " + err.Error())
+			}
+		}
+		fmt.Println()
+	} else if err := agent(http.MethodPost, "/doctor?"+url.Values{"fix": {*fix}}.Encode(), nil, &checks); err != nil {
 		return err
 	}
+	printChecks(checks)
+	return nil
+}
+
+func printChecks(checks []api.Check) {
 	for _, c := range checks {
 		line := fmt.Sprintf("%-4s %s", strings.ToUpper(string(c.Status)), c.Title)
 		if c.Detail != nil && *c.Detail != "" {
@@ -284,7 +371,62 @@ func cmdDoctor(args []string) error {
 		}
 	}
 	fmt.Println(doctor.Summary(checks))
-	return nil
+}
+
+func fixable(checks []api.Check) []string {
+	var ids []string
+	for _, c := range checks {
+		if c.Status != api.CheckStatusOk && c.Fixable != nil && *c.Fixable {
+			ids = append(ids, c.Id)
+		}
+	}
+	return ids
+}
+
+// cmdUpdate installs the current release, or with --check only says whether there is one.
+func cmdUpdate(args []string) error {
+	fs := flag.NewFlagSet("update", flag.ExitOnError)
+	check := fs.Bool("check", false, "only check for a new release")
+	_ = fs.Parse(args)
+	if *check {
+		return cmdCommand("check-update")
+	}
+	fmt.Println("checking the release; a download can take a few minutes")
+	return cmdCommand("update")
+}
+
+// cmdConfig shows the config, one value, or changes a setting through the agent.
+func cmdConfig(args []string) error {
+	var c local.Config
+	if err := agent(http.MethodGet, "/config", nil, &c); err != nil {
+		return err
+	}
+	values := map[string]string{"control-url": c.ControlURL, "release-url": c.ReleaseURL, "network": c.Network, "auto-update": onOff(c.AutoUpdate)}
+	switch {
+	case len(args) == 0:
+		for _, key := range []string{"auto-update", "network", "control-url", "release-url"} {
+			row(key, values[key])
+		}
+		fmt.Println("\nnosana-host config set auto-update on|off changes it; the others are set by install")
+		return nil
+	case args[0] == "get" && len(args) == 2:
+		v, ok := values[args[1]]
+		if !ok {
+			return fmt.Errorf("unknown key %q", args[1])
+		}
+		fmt.Println(v)
+		return nil
+	case args[0] == "set" && len(args) == 3:
+		return result("/commands/set-config", map[string]string{"key": args[1], "value": args[2]})
+	}
+	return errors.New("usage: nosana-host config [get KEY | set KEY VALUE]")
+}
+
+func onOff(b bool) string {
+	if b {
+		return "on"
+	}
+	return "off"
 }
 
 // cmdNode runs the console's start-node, stop-node or restart-node.
@@ -299,35 +441,100 @@ func cmdNode(args []string) error {
 const agreementURL = "https://drive.google.com/file/d/1dFWCT5Zon08pCPrftdxB9ByvbuDafTwy/view"
 
 // cmdRegister registers the node with the contact details the node would ask on its terminal and
-// the owner's acceptance of the Participation Agreement. Flags it does not get it asks for when
-// stdin is a terminal.
+// the owner's acceptance of the Participation Agreement, or changes the details of a registered
+// node. On a terminal it asks for what the flags did not give, with the current values as the
+// defaults; a flag not given keeps the current value.
 func cmdRegister(args []string) error {
 	fs := flag.NewFlagSet("register", flag.ExitOnError)
+	show := fs.Bool("show", false, "only show the current details")
 	email := fs.String("email", "", "where Nosana can reach you about this node")
 	discord := fs.String("discord", "", "your Discord username (optional)")
 	twitter := fs.String("twitter", "", "your Twitter username (optional)")
 	accept := fs.Bool("accept-agreement", false, "you read the Participation Agreement and agree to its terms")
 	_ = fs.Parse(args)
+	var current api.AgentRegistration
+	if err := agent(http.MethodGet, "/registration", nil, &current); err != nil {
+		return err
+	}
+	reg := current.Registration
+	if reg == nil {
+		reg = &api.Registration{}
+		fmt.Println("the node is not registered yet")
+	} else {
+		row("email", reg.Email)
+		row("discord", orNone(reg.Discord))
+		row("twitter", orNone(reg.Twitter))
+	}
+	if *show {
+		return nil
+	}
+	given := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { given[f.Name] = true })
+	registered := reg.Email != ""
 	in := bufio.NewReader(os.Stdin)
-	if isTerminal(os.Stdin) {
-		if *email == "" {
-			*email = ask(in, "Email: ")
-			*discord = ask(in, "Discord username (optional): ")
-			*twitter = ask(in, "Twitter username (optional): ")
+	if isTerminal(os.Stdin) && !given["email"] {
+		if registered {
+			fmt.Println("\nEnter keeps a value; a dash clears it")
 		}
-		if !*accept {
-			fmt.Println("Participation Agreement: " + agreementURL)
-			*accept = strings.EqualFold(ask(in, "Have you read it, and do you agree to its terms? [y/N] "), "y")
+		*email = askDefault(in, "Email", reg.Email)
+		if !given["discord"] {
+			*discord = askDefault(in, "Discord username (optional)", orEmpty(reg.Discord))
 		}
+		if !given["twitter"] {
+			*twitter = askDefault(in, "Twitter username (optional)", orEmpty(reg.Twitter))
+		}
+	} else {
+		if !given["email"] {
+			*email = reg.Email
+		}
+		if !given["discord"] {
+			*discord = orEmpty(reg.Discord)
+		}
+		if !given["twitter"] {
+			*twitter = orEmpty(reg.Twitter)
+		}
+	}
+	if !registered && !*accept && isTerminal(os.Stdin) {
+		fmt.Println("Participation Agreement: " + agreementURL)
+		*accept = strings.EqualFold(ask(in, "Have you read it, and do you agree to its terms? [y/N] "), "y")
 	}
 	if *email == "" {
 		return errors.New("usage: nosana-host register --email ADDRESS [--discord NAME] [--twitter NAME] --accept-agreement")
 	}
-	if !*accept {
+	if !registered && !*accept {
 		return errors.New("the Participation Agreement has to be accepted: " + agreementURL)
 	}
 	q := url.Values{"email": {*email}, "discord": {*discord}, "twitter": {*twitter}, "accept": {"1"}}
-	return result("/register?" + q.Encode())
+	return result("/register?"+q.Encode(), nil)
+}
+
+func orNone(s *string) string {
+	if s == nil || *s == "" {
+		return "none"
+	}
+	return *s
+}
+
+func orEmpty(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+// askDefault asks with the current value as the default; Enter keeps it and a dash clears it.
+func askDefault(in *bufio.Reader, prompt, current string) string {
+	if current != "" {
+		prompt += " [" + current + "]"
+	}
+	switch answer := ask(in, prompt+": "); answer {
+	case "":
+		return current
+	case "-":
+		return ""
+	default:
+		return answer
+	}
 }
 
 func isTerminal(f *os.File) bool {
@@ -343,13 +550,13 @@ func ask(in *bufio.Reader, prompt string) string {
 
 // cmdCommand runs one of the console's commands; the agent queues it with the console's.
 func cmdCommand(verb string) error {
-	return result("/commands/" + verb)
+	return result("/commands/"+verb, nil)
 }
 
 // result posts to the agent and prints the message of the command result it answers with.
-func result(path string) error {
+func result(path string, body any) error {
 	var r api.CommandResult
-	if err := agent(http.MethodPost, path, &r); err != nil {
+	if err := agent(http.MethodPost, path, body, &r); err != nil {
 		return err
 	}
 	if !r.Ok {
@@ -359,12 +566,16 @@ func result(path string) error {
 	return nil
 }
 
-// agent calls the running agent and decodes its JSON answer into out.
-func agent(method, path string, out any) error {
-	body, err := local.Call(context.Background(), method, path)
+// agent calls the running agent, with body as JSON when given, and decodes its JSON answer into
+// out when given.
+func agent(method, path string, body, out any) error {
+	answer, err := local.Call(context.Background(), method, path, body)
 	if err != nil {
 		return err
 	}
-	defer body.Close()
-	return json.NewDecoder(body).Decode(out)
+	defer answer.Close()
+	if out == nil {
+		return nil
+	}
+	return json.NewDecoder(answer).Decode(out)
 }

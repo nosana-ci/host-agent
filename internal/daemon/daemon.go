@@ -46,6 +46,7 @@ type daemon struct {
 	mu     sync.Mutex
 	gpu    api.GpuStatus
 	checks []api.Check
+	auto   bool // the autoUpdate setting, as set-config may change it
 }
 
 func Run(ctx context.Context) error {
@@ -76,10 +77,12 @@ func Run(ctx context.Context) error {
 		ctrl: control.New(cfg.ControlURL, wallet),
 		bal:  bal,
 		cmds: make(chan []job, 16),
+		auto: cfg.AutoUpdateOn(),
 		// host-manager wants arrays before the first doctor run too
 		gpu:    api.GpuStatus{Gpus: []api.Gpu{}},
 		checks: []api.Check{},
 	}
+	d.upd.AutoUpdate = d.autoUpdate
 	d.cli = &http.Server{Handler: d.localHandler(), ReadHeaderTimeout: 5 * time.Second}
 	slog.Info("nosana-host", "version", version.Version, "node", d.address, "control", cfg.ControlURL)
 	if p := st.State().Update.Pending; p == nil || p.Version != version.Version { // an update says so itself
@@ -106,7 +109,7 @@ func (d *daemon) doctorLoop(ctx context.Context) {
 }
 
 func (d *daemon) runDoctor(ctx context.Context) []api.Check {
-	g, checks := doctor.Run(ctx, d.cfg.ControlURL, d.pc)
+	g, checks := doctor.Run(ctx, d.cfg, d.pc)
 	d.mu.Lock()
 	d.gpu, d.checks = g, checks
 	d.mu.Unlock()
@@ -248,17 +251,19 @@ func sleep(ctx context.Context, d time.Duration) {
 
 func (d *daemon) status(ctx context.Context) api.AgentStatus {
 	d.mu.Lock()
-	g, checks := d.gpu, d.checks
+	g, checks, settings := d.gpu, d.checks, api.AgentSettings{AutoUpdate: d.auto}
 	d.mu.Unlock()
+	network := api.AgentStatusNetwork(d.cfg.Network)
 	return api.AgentStatus{
 		Version: 1,
-		Agent:   api.AgentInfo{Version: version.Version, Commands: verbs(), Update: d.upd.Status()},
+		Agent:   api.AgentInfo{Version: version.Version, Commands: d.verbs(), Update: d.upd.Status(), Settings: &settings},
 		Node:    d.sup.Status(),
 		Gpu:     g,
 		Disk:    doctor.Disk(),
 		Checks:  checks,
 		Runtime: d.runtimeStatus(ctx),
 		Wallet:  d.bal.status(),
+		Network: &network,
 	}
 }
 

@@ -38,6 +38,8 @@ type Updater struct {
 	st  *store.Store
 	sup *node.Supervisor
 	pc  *podman.Client
+	// AutoUpdate says whether Run may apply what it finds; off, it only reports a newer release.
+	AutoUpdate func() bool
 	// proving is set when this process is a pending version that must stay up keepAfter.
 	proving bool
 
@@ -48,7 +50,7 @@ type Updater struct {
 }
 
 func New(cfg config.Config, st *store.Store, sup *node.Supervisor, pc *podman.Client) *Updater {
-	u := &Updater{cfg: cfg, st: st, sup: sup, pc: pc, ready: make(chan struct{}, 1), status: api.UpdateStatus{State: "idle"}}
+	u := &Updater{cfg: cfg, st: st, sup: sup, pc: pc, ready: make(chan struct{}, 1), status: api.UpdateStatus{State: "idle"}, AutoUpdate: cfg.AutoUpdateOn}
 	if p := st.State().Update.Pending; p != nil && p.Version == version.Version {
 		u.proving = true
 		u.set("pending", "version "+p.Version+" is kept after "+keepAfter.String()+" up")
@@ -65,14 +67,14 @@ func (u *Updater) Status() api.UpdateStatus {
 func (u *Updater) set(state, detail string) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	u.status = api.UpdateStatus{State: state, LatestVersion: u.status.LatestVersion}
+	u.status = api.UpdateStatus{State: state, LatestVersion: u.status.LatestVersion, CheckedAt: u.status.CheckedAt}
 	if detail != "" {
 		u.status.Detail = &detail
 	}
 }
 
-// Run checks the release every checkEvery and applies what it finds. A pending version is kept
-// once this process has been up for keepAfter.
+// Run checks the release every checkEvery and applies what it finds, or only reports it while
+// auto-update is off. A pending version is kept once this process has been up for keepAfter.
 func (u *Updater) Run(ctx context.Context) {
 	var keep <-chan time.Time
 	if u.proving {
@@ -94,7 +96,13 @@ func (u *Updater) Run(ctx context.Context) {
 			keep = nil
 			u.commit()
 		case <-next:
-			if _, err := u.Check(ctx, false); err != nil && ctx.Err() == nil {
+			var err error
+			if u.AutoUpdate() {
+				_, err = u.Check(ctx, false)
+			} else {
+				_, err = u.CheckOnly(ctx)
+			}
+			if err != nil && ctx.Err() == nil {
 				slog.Warn("update check", "err", err)
 			}
 			next = time.After(checkEvery)
@@ -113,14 +121,10 @@ func (u *Updater) Check(ctx context.Context, force bool) (string, error) {
 	if p := u.st.State().Update.Pending; p != nil {
 		return "version " + p.Version + " is still proving itself", nil
 	}
-	u.set("checking", "")
-	m, err := manifest.Fetch(ctx, u.cfg.ReleaseURL)
+	m, err := u.fetch(ctx)
 	if err != nil {
 		return u.fail(err)
 	}
-	u.mu.Lock()
-	u.status.LatestVersion = &m.Version
-	u.mu.Unlock()
 	u.sup.SetImage(m.Node.Image)
 	if force {
 		u.sup.SwapNow()
@@ -166,6 +170,40 @@ func (u *Updater) Check(ctx context.Context, force bool) (string, error) {
 		u.st.Info("update", "switching to agent %s (was %s) on its own; it is kept once it has run for %s", m.Version, version.Version, keepAfter)
 	}
 	return "switching to agent " + m.Version, nil
+}
+
+// CheckOnly reads the manifest and reports whether a newer release exists, without applying it:
+// the check-update command, and the periodic check while auto-update is off.
+func (u *Updater) CheckOnly(ctx context.Context) (string, error) {
+	if !u.apply.TryLock() {
+		return "an update is already running", nil
+	}
+	defer u.apply.Unlock()
+	if p := u.st.State().Update.Pending; p != nil {
+		return "version " + p.Version + " is still proving itself", nil
+	}
+	m, err := u.fetch(ctx)
+	if err != nil {
+		return u.fail(err)
+	}
+	if version.Compare(m.Version, version.Version) <= 0 && m.Node.Image == u.sup.Image() && version.Compare(m.Runtime.Version, bundle.Current()) <= 0 {
+		return u.done("idle", "up to date")
+	}
+	return u.done("available", "release "+m.Version+" can be installed with nosana-host update or from the console")
+}
+
+// fetch reads the release manifest and records its version and when it was read.
+func (u *Updater) fetch(ctx context.Context) (*manifest.Manifest, error) {
+	u.set("checking", "")
+	m, err := manifest.Fetch(ctx, u.cfg.ReleaseURL)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	u.mu.Lock()
+	u.status.LatestVersion, u.status.CheckedAt = &m.Version, &now
+	u.mu.Unlock()
+	return m, nil
 }
 
 func (u *Updater) done(state, detail string) (string, error) {

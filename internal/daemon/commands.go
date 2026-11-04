@@ -4,31 +4,37 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/nosana-ci/host-agent/internal/api"
 	"github.com/nosana-ci/host-agent/internal/doctor"
+	"github.com/nosana-ci/host-agent/internal/solana"
 )
+
+// airdropSOL is what the devnet faucet is asked for: well above what the node needs to start.
+const airdropSOL = 1.0
 
 // Every command the console can send, in the order the agent advertises them. The CLI sends the
 // same verbs over the socket. A new verb is one entry here; the console shows what the heartbeat
-// lists.
+// lists. A command with devnet set is advertised on devnet only.
 var commands = []struct {
-	verb string
-	run  func(d *daemon, ctx context.Context, args map[string]any) (string, error)
+	verb   string
+	devnet bool
+	run    func(d *daemon, ctx context.Context, args map[string]any) (string, error)
 }{
-	{"restart-node", func(d *daemon, _ context.Context, _ map[string]any) (string, error) {
+	{"restart-node", false, func(d *daemon, _ context.Context, _ map[string]any) (string, error) {
 		return "node restarting", d.sup.Restart()
 	}},
-	{"stop-node", func(d *daemon, _ context.Context, _ map[string]any) (string, error) {
+	{"stop-node", false, func(d *daemon, _ context.Context, _ map[string]any) (string, error) {
 		return "node stopping; it stays stopped until it is started again", d.sup.Stop()
 	}},
-	{"start-node", func(d *daemon, _ context.Context, _ map[string]any) (string, error) {
+	{"start-node", false, func(d *daemon, _ context.Context, _ map[string]any) (string, error) {
 		return "node starting", d.sup.Start()
 	}},
-	{"run-doctor", func(d *daemon, ctx context.Context, _ map[string]any) (string, error) {
+	{"run-doctor", false, func(d *daemon, ctx context.Context, _ map[string]any) (string, error) {
 		return doctor.Summary(d.runDoctor(ctx)), nil
 	}},
-	{"fix-check", func(d *daemon, ctx context.Context, args map[string]any) (string, error) {
+	{"fix-check", false, func(d *daemon, ctx context.Context, args map[string]any) (string, error) {
 		id, _ := args["id"].(string)
 		if err := doctor.Fix(ctx, id); err != nil {
 			return "", err
@@ -40,16 +46,36 @@ var commands = []struct {
 		}
 		return "fixed " + id + "; " + doctor.Summary(d.runDoctor(ctx)), nil
 	}},
-	{"update", func(d *daemon, ctx context.Context, _ map[string]any) (string, error) {
-
+	{"check-update", false, func(d *daemon, ctx context.Context, _ map[string]any) (string, error) {
+		return d.upd.CheckOnly(ctx)
+	}},
+	{"update", false, func(d *daemon, ctx context.Context, _ map[string]any) (string, error) {
 		return d.upd.Check(ctx, true)
+	}},
+	{"set-config", false, func(d *daemon, _ context.Context, args map[string]any) (string, error) {
+		key, _ := args["key"].(string)
+		value, _ := args["value"].(string)
+		return d.setConfig(key, value)
+	}},
+	{"request-airdrop", true, func(d *daemon, ctx context.Context, _ map[string]any) (string, error) {
+		sig, err := solana.RequestAirdrop(ctx, solana.RPCURL(d.cfg.Network), d.address, airdropSOL)
+		if err != nil {
+			return "", fmt.Errorf("the devnet faucet refused: %w", err)
+		}
+		go func() { // the balance shows it once the transaction landed
+			sleep(ctx, 10*time.Second)
+			d.bal.refresh(ctx)
+		}()
+		return fmt.Sprintf("asked the devnet faucet for %v SOL (transaction %s); the balance shows it within a minute", airdropSOL, sig), nil
 	}},
 }
 
-func verbs() []string {
+func (d *daemon) verbs() []string {
 	out := make([]string, 0, len(commands))
 	for _, c := range commands {
-		out = append(out, c.verb)
+		if !c.devnet || d.cfg.Network == "devnet" {
+			out = append(out, c.verb)
+		}
 	}
 	return out
 }

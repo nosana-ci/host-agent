@@ -1,4 +1,4 @@
-// Package doctor runs the host checks the console shows, and the three fixes the agent can apply
+// Package doctor runs the host checks the console shows, and the fixes the agent can apply
 // itself. It also detects the GPUs and reads the disk the state directory lives on.
 package doctor
 
@@ -20,22 +20,30 @@ import (
 	"github.com/nosana-ci/host-agent/internal/config"
 	"github.com/nosana-ci/host-agent/internal/podman"
 	"github.com/nosana-ci/host-agent/internal/service"
+	"github.com/nosana-ci/host-agent/internal/solana"
 )
 
 // minDriver is the oldest NVIDIA driver major version the node supports.
 const minDriver = 550
 
+// maxClockSkew is how far the clock may be off: host-manager refuses a signed request whose time
+// is more than 60 seconds away from its own.
+const maxClockSkew = 30 * time.Second
+
 var netClient = &http.Client{Timeout: 5 * time.Second}
 
-func Run(ctx context.Context, controlURL string, pc *podman.Client) (api.GpuStatus, []api.Check) {
+func Run(ctx context.Context, cfg config.Config, pc *podman.Client) (api.GpuStatus, []api.Check) {
 	g, gpuErr := detectGPUs(ctx)
+	controlURL := strings.TrimRight(cfg.ControlURL, "/") + "/health"
 	checks := []api.Check{
 		checkOS(),
 		checkCgroup(),
 		checkDisk(),
 		checkPodman(ctx, pc),
 		checkFirewall(),
-		checkReach(ctx, "control", "host-manager reachable", strings.TrimRight(controlURL, "/")+"/health", http.StatusOK),
+		checkReach(ctx, "control", "host-manager reachable", controlURL, http.StatusOK),
+		checkClock(ctx, controlURL),
+		checkRPC(ctx, cfg.Network),
 		// The registry answers 401 to anonymous clients, which is what a working one does.
 		checkReach(ctx, "registry", "Container registry reachable", "https://registry-1.docker.io/v2/", http.StatusUnauthorized),
 	}
@@ -53,6 +61,15 @@ var fixes = map[string]func(ctx context.Context) error{
 	"podman":       func(context.Context) error { return service.Systemctl("restart", service.PodmanUnit) },
 	"firewall":     EnsureFirewallTool,
 	"persistenced": func(context.Context) error { return service.Systemctl("enable", "--now", "nvidia-persistenced") },
+	"clock":        func(ctx context.Context) error { return run(ctx, "timedatectl", "set-ntp", "true") },
+}
+
+func run(ctx context.Context, name string, args ...string) error {
+	out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s: %v: %s", name, err, lastLine(out))
+	}
+	return nil
 }
 
 // Summary is one line about the checks: all passed, or which need attention.
@@ -228,6 +245,42 @@ func checkReach(ctx context.Context, id, title, url string, expect int) api.Chec
 		return check(id, title, api.CheckStatusFail, fmt.Sprintf("%s answered %s", url, resp.Status), "Something answers at this address, but not the expected service.")
 	}
 	return check(id, title, api.CheckStatusOk, url, "")
+}
+
+// checkClock compares the clock with host-manager's, from the Date header of its health answer.
+func checkClock(ctx context.Context, url string) api.Check {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	var resp *http.Response
+	if err == nil {
+		resp, err = netClient.Do(req)
+	}
+	if err != nil {
+		return check("clock", "System clock", api.CheckStatusWarn, "not compared: host-manager did not answer", "")
+	}
+	resp.Body.Close()
+	theirs, err := http.ParseTime(resp.Header.Get("Date"))
+	if err != nil {
+		return check("clock", "System clock", api.CheckStatusWarn, "not compared: host-manager sent no date", "")
+	}
+	skew := time.Since(theirs).Round(time.Second)
+	if skew.Abs() > maxClockSkew {
+		return check("clock", "System clock", api.CheckStatusFail, fmt.Sprintf("off by %s against host-manager, whose signed requests allow 60 s", skew),
+			"Turn on time synchronisation: timedatectl set-ntp true")
+	}
+	return check("clock", "System clock", api.CheckStatusOk, fmt.Sprintf("within %s of host-manager", skew.Abs()), "")
+}
+
+// checkRPC asks the network's Solana RPC, the one the wallet balance and the node use, for its health.
+func checkRPC(ctx context.Context, network string) api.Check {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	url := solana.RPCURL(network)
+	if err := solana.Healthy(ctx, url); err != nil {
+		return check("solana-rpc", "Solana RPC reachable", api.CheckStatusFail, err.Error(), "The node cannot read the chain without it; check outbound HTTPS, or wait if the RPC itself is down.")
+	}
+	return check("solana-rpc", "Solana RPC reachable", api.CheckStatusOk, network+" via "+strings.SplitN(url, "?", 2)[0], "")
 }
 
 var cdiSpecs = []string{"/etc/cdi/nvidia.yaml", "/var/run/cdi/nvidia.yaml", "/etc/cdi/nvidia.json"}

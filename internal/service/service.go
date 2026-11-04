@@ -89,14 +89,14 @@ func Systemctl(args ...string) error {
 	return nil
 }
 
-// Journal writes the agent's last tail lines of the journal (all when 0) to w, and keeps
+// Journal writes the unit's last tail lines of the journal (all when 0) to w, and keeps
 // following when follow is set, until ctx ends.
-func Journal(ctx context.Context, tail int, follow bool, w io.Writer) error {
+func Journal(ctx context.Context, unit string, tail int, follow bool, w io.Writer) error {
 	lines := "all"
 	if tail > 0 {
 		lines = strconv.Itoa(tail)
 	}
-	args := []string{"-u", AgentUnit, "--no-pager", "-n", lines}
+	args := []string{"-u", unit, "--no-pager", "-n", lines}
 	if follow {
 		args = append(args, "-f")
 	}

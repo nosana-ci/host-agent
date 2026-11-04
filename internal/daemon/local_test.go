@@ -78,15 +78,20 @@ func TestLocalDoctorFixIsQueued(t *testing.T) {
 }
 
 // register signs the node's registration with host-manager, after the CLI had the agreement
-// accepted; without the acceptance or with a bad email it never reaches host-manager.
+// accepted; without the acceptance or with a bad email it never reaches host-manager. The
+// current details are read from host-manager for the CLI to show.
 func TestLocalRegister(t *testing.T) {
 	var got map[string]string
 	hm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/nodes/register" || r.Header.Get("Authorization") == "" {
+		if r.URL.Path != "/agent/registration" || r.Header.Get("Authorization") == "" {
 			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 		}
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(`{"registration":{"email":"old@example.com","twitter":"old"}}`))
+			return
+		}
 		_ = json.NewDecoder(r.Body).Decode(&got)
-		_, _ = w.Write([]byte(`{"status":"registered"}`))
+		_, _ = w.Write([]byte(`{"registration":` + mustJSON(got) + `}`))
 	}))
 	defer hm.Close()
 	_, wallet, _ := ed25519.GenerateKey(rand.Reader)
@@ -106,7 +111,19 @@ func TestLocalRegister(t *testing.T) {
 	if rec := post("email=+me%40example.com+&discord=me&twitter=&accept=1"); rec.Code != http.StatusOK {
 		t.Fatalf("register: %d %s", rec.Code, rec.Body)
 	}
-	if got["email"] != "me@example.com" || got["discord"] != "me" || got["twitter"] != "" {
+	if _, ok := got["twitter"]; got["email"] != "me@example.com" || got["discord"] != "me" || ok {
 		t.Fatalf("host-manager got %v", got)
 	}
+
+	rec := httptest.NewRecorder()
+	d.localHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/registration", nil))
+	var current api.AgentRegistration
+	if err := json.NewDecoder(rec.Body).Decode(&current); err != nil || current.Registration == nil || current.Registration.Email != "old@example.com" || *current.Registration.Twitter != "old" {
+		t.Fatalf("GET /registration: %d %s (%v)", rec.Code, rec.Body, err)
+	}
+}
+
+func mustJSON(v any) string {
+	raw, _ := json.Marshal(v)
+	return string(raw)
 }
