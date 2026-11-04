@@ -72,11 +72,13 @@ Install script: `host-console/static/install.sh`.
   The heartbeat lists them, so the console shows what this agent can do. The CLI's
   `node start|stop|restart`, `update`, `config set` and `airdrop` are the same commands: they wait
   in the same queue and run one at a time with the console's.
-- **Node log.** Every 5 s the supervisor reads the node's last 60 log lines: what the node does now
-  (a benchmark and its step, the place in the market queue, the job it runs, a countdown to a
-  restart) goes into the heartbeat as `node.activity`, a node stuck at its sign-up prompt as
-  `node.prompt`, and the lines worth knowing (benchmark verdicts, market and queue, jobs) become
-  events of type node.
+- **Node state.** Every 5 s the supervisor reads the node's own `/node/info` on its local port:
+  the state category, the exact status with its details, and the recent state changes. What the
+  node does now (a benchmark, the place in the market queue, the job it runs, a countdown to a
+  restart) goes into the heartbeat as `node.activity`, a node waiting at its sign-up questions as
+  `node.prompt`, and the state changes worth knowing (SOL and registration waits, benchmark
+  verdicts, market and queue, jobs, restarts) become events of type node. Needs a node image with
+  the richer `/node/info` (node MR !91); the agent does not read the node's log.
 - **Reach.** Every 2 minutes the agent asks the node's public domain
   (`https://<address>.node.k8s.<prd|dev>.nos.ci/node/info`) whether it answers for this node, the
   way jobs reach it; the result is `node.reach` and the `node-domain` check.

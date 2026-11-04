@@ -1,33 +1,13 @@
 package podman
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 )
-
-// LogsTimestamped is the container's last tail lines with podman's RFC 3339 time in front of each.
-func (c *Client) LogsTimestamped(ctx context.Context, name string, tail int) ([]byte, error) {
-	q := url.Values{"stdout": {"true"}, "stderr": {"true"}, "timestamps": {"true"}, "tail": {strconv.Itoa(tail)}}
-	resp, err := c.do(ctx, http.MethodGet, "/containers/"+url.PathEscape(name)+"/logs", q, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound {
-		return nil, ErrNotFound
-	}
-	if resp.StatusCode >= 300 {
-		return nil, apiError(resp)
-	}
-	var buf bytes.Buffer
-	return buf.Bytes(), demux(resp.Body, &buf)
-}
 
 // DiskUsage is /system/df: what each image, container and volume takes.
 type DiskUsage struct {

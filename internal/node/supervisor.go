@@ -5,19 +5,16 @@ package node
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
-	"net/http"
 	"slices"
 	"sync"
 	"time"
 
 	"github.com/nosana-ci/host-agent/internal/api"
 	"github.com/nosana-ci/host-agent/internal/config"
-	"github.com/nosana-ci/host-agent/internal/nodelog"
 	"github.com/nosana-ci/host-agent/internal/podman"
 	"github.com/nosana-ci/host-agent/internal/store"
 	"github.com/nosana-ci/host-agent/internal/version"
@@ -56,16 +53,12 @@ type Supervisor struct {
 	restarted bool // the restart happened but the state could not record it
 	crashes   int
 	nextStart time.Time
-	swapNow   bool // the owner asked for the update: the next image swap does not wait
-	log       nodelog.Tracker
+	swapNow   bool      // the owner asked for the update: the next image swap does not wait
+	eventsAt  time.Time // the newest node state change reported as an event
 
 	// WaitingForSOL reports that the node wallet is below the SOL the node waits for at start.
 	WaitingForSOL func() bool
 }
-
-// logTail is how many lines of the node log each observation reads: enough to see a whole
-// benchmark verdict with its report.
-const logTail = 60
 
 func New(pc *podman.Client, st *store.Store, network string) *Supervisor {
 	s := &Supervisor{pc: pc, st: st, network: network, wake: make(chan struct{}, 1)}
@@ -117,7 +110,7 @@ func (s *Supervisor) MayInterrupt() bool {
 		}
 		return time.Since(s.waitingSince()) >= maxWait
 	}
-	return true
+	return true // starting, restarting, or waiting for SOL or its registration: nothing to lose
 }
 
 // waitingSince is when a change first waited for the node, recording now if none did.
@@ -414,18 +407,18 @@ func (s *Supervisor) observe(ctx context.Context, ctr *podman.Container, image s
 		if img := ctr.Config.Labels[LabelImage]; img != "" {
 			status.Image = img
 		}
-		if raw, err := s.pc.LogsTimestamped(ctx, ContainerName, logTail); err == nil {
-			for _, e := range s.log.Feed(nodelog.Lines(raw)) {
-				s.st.Record("node", e.Level, "", "%s", e.Message)
-			}
-		}
 		if ctr.State.Running {
-			if state := nodeState(); state != "" {
-				status.State = &state
-			}
-			status.Activity = s.log.Activity(time.Now())
-			if p := s.log.Prompt(); p != "" {
-				status.Prompt = &p
+			if info := readInfo(ctx); info != nil {
+				status.State = &info.State
+				status.Activity = info.Activity()
+				if p := info.Prompt(); p != "" {
+					status.Prompt = &p
+				}
+				var events []Event
+				events, s.eventsAt = info.Events(s.eventsAt)
+				for _, e := range events {
+					s.st.Record("node", e.Level, "", "%s", e.Message)
+				}
 			}
 		}
 	}
@@ -433,23 +426,4 @@ func (s *Supervisor) observe(ctx context.Context, ctr *podman.Container, image s
 	status.Desired, status.Restarts, status.LastError = s.status.Desired, s.status.Restarts, s.status.LastError
 	s.status, s.observed = status, true
 	s.mu.Unlock()
-}
-
-var infoClient = &http.Client{Timeout: 3 * time.Second}
-
-// nodeState is the node's own state (QUEUED, RUNNING_JOB, ...) from /node/info, or "" when the
-// API does not answer.
-func nodeState() string {
-	resp, err := infoClient.Get(fmt.Sprintf("http://127.0.0.1:%d/node/info", apiPort))
-	if err != nil {
-		return ""
-	}
-	defer resp.Body.Close()
-	var info struct {
-		State string `json:"state"`
-	}
-	if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&info) != nil {
-		return ""
-	}
-	return info.State
 }
