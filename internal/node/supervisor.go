@@ -168,6 +168,13 @@ func (s *Supervisor) restartDone() {
 	}
 }
 
+// Image is the node image the release names, the one the container runs or will run.
+func (s *Supervisor) Image() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.image
+}
+
 // SetImage changes the node image; the container is recreated once the node is idle.
 func (s *Supervisor) SetImage(image string) {
 	if image == "" {

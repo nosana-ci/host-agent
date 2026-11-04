@@ -3,7 +3,9 @@
 package local
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -37,6 +39,14 @@ type Status struct {
 	Status       api.AgentStatus `json:"status"`
 }
 
+// Config is the config file as the CLI shows it: the install's values and the settings.
+type Config struct {
+	ControlURL string `json:"controlUrl"`
+	ReleaseURL string `json:"releaseUrl"`
+	Network    string `json:"network"`
+	AutoUpdate bool   `json:"autoUpdate"`
+}
+
 // Listen opens the socket for root and the nosana group.
 func Listen() (net.Listener, error) {
 	if err := os.MkdirAll(config.RunDir, 0o755); err != nil {
@@ -63,10 +73,18 @@ var client = &http.Client{Transport: &http.Transport{
 	},
 }}
 
-// Call sends a request to the running agent over its socket and returns the answer's body, or
-// the agent's error message; the caller closes the body.
-func Call(ctx context.Context, method, path string) (io.ReadCloser, error) {
-	req, _ := http.NewRequestWithContext(ctx, method, "http://agent"+path, nil)
+// Call sends a request, with body as JSON when it is not nil, to the running agent over its
+// socket and returns the answer's body, or the agent's error message; the caller closes the body.
+func Call(ctx context.Context, method, path string, body any) (io.ReadCloser, error) {
+	var rd io.Reader
+	if body != nil {
+		raw, err := json.Marshal(body)
+		if err != nil {
+			return nil, err
+		}
+		rd = bytes.NewReader(raw)
+	}
+	req, _ := http.NewRequestWithContext(ctx, method, "http://agent"+path, rd)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, explain(err)

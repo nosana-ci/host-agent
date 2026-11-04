@@ -31,20 +31,22 @@ newer), nvidia-container-toolkit and a CDI spec for the GPU; the console's healt
 what is missing.
 
 ```sh
-nosana-host status                 # what the console's host page shows: link, wallet, node, GPU, disk, checks, update
-nosana-host logs [node|agent] -f   # the node container's log, or the agent's journal
-nosana-host doctor [--fix ID]      # the host checks; --fix applies the fix of one check
+nosana-host status                 # what the console's host page shows: network, link, wallet (SOL and NOS), node, GPU, disk, checks, update
+nosana-host logs [node|agent|podman|job ID] -f   # the node container's log, a journal, or a job's container
+nosana-host doctor [--fix ID|all] [--yes]   # the host checks; --fix applies the fix of one check, or every fix there is
 nosana-host node start|stop|restart   # the node container, like the console's buttons
-nosana-host update                 # install the current release now
-nosana-host register               # the node's email (and Discord, Twitter) and the Participation Agreement
+nosana-host update [--check]       # install the current release now; --check only looks
+nosana-host config [set auto-update on|off]   # the settings and the install's values
+nosana-host register [--show]      # the node's email (and Discord, Twitter) and the Participation Agreement; shows and changes them later
+nosana-host airdrop                # devnet only: ask the faucet for SOL
 sudo nosana-host uninstall [--purge]   # --purge deletes state too, after backing up the wallet into your home
 ```
 
 Everything but install and uninstall talks to the running agent over `/run/nosana/cli.sock`, which belongs
 to root and the `nosana` group; the installer adds the user who ran it to that group (log in again
 once), so only install and uninstall need sudo. While the agent is down, `status` shows what the
-install wrote instead (with sudo also the node address and the link) and `logs agent` reads the
-journal directly.
+install wrote instead (with sudo also the node address and the link), `logs agent` and `logs podman`
+read the journal directly, and `logs node` reads podman's socket (root's).
 
 Install script: `host-console/static/install.sh`.
 
@@ -55,16 +57,24 @@ Install script: `host-console/static/install.sh`.
   socket next to it, port 5001 on `127.0.0.1:15001` for `/node/info`), restarts it when it asks
   (exit 129) or with a backoff when it crashes, keeps it stopped when the owner said so, and swaps
   the image when the release changes it and the node may be interrupted (see Updates).
-- **Heartbeat.** Every 15 s: agent version and the commands it accepts, update state, node state,
-  GPU, disk, the host checks, the runtime and the node wallet's SOL balance (read every minute from the
-  Nosana kit's default RPC: Nosana's Ironforge endpoint on mainnet, the public one on devnet), signed with the node wallet like every node request.
+- **Heartbeat.** Every 15 s: agent version, the commands it accepts and its settings, update state,
+  node state, GPU, disk, the host checks, the runtime, the network and the node wallet's SOL and NOS
+  balances (read every minute from the Nosana kit's default RPC: Nosana's Ironforge endpoint on
+  mainnet, the public one on devnet), signed with the node wallet like every node request.
   Commands come back in the
   answer and through a 25 s long-poll; each is answered done or failed with a message.
 - **Commands.** `restart-node`, `stop-node`, `start-node`, `run-doctor`, `fix-check` (podman
-  service restart, firewall tool install, nvidia-persistenced), `update` (also while the node is busy).
+  service restart, firewall tool install, nvidia-persistenced, NTP), `check-update`, `update` (also while
+  the node is busy), `set-config` (`auto-update` on or off) and, on devnet, `request-airdrop`.
   The heartbeat lists them, so the console shows what this agent can do. The CLI's
-  `node start|stop|restart` and `update` are the same commands: they wait in the
-  same queue and run one at a time with the console's.
+  `node start|stop|restart`, `update`, `config set` and `airdrop` are the same commands: they wait
+  in the same queue and run one at a time with the console's.
+- **Settings.** `/etc/nosana/host.json` holds the install's values (host-manager URL, release URL,
+  network) and `autoUpdate`. With auto-update off the agent still reads the release every 10
+  minutes and reports a newer one (update state `available`), but installs it only on `update`.
+- **Registration.** `register` reads the current contact details from host-manager
+  (`GET /agent/registration`) and writes them back (`PUT`), signed with the node key, so the owner
+  can change a Discord handle later from the machine or from the console.
 - **Events.** What the agent does by itself or for its CLI goes to the console's Activity: its
   start, an automatic update and whether it was kept or rolled back, a runtime switch, a node crash,
   a new node container or image, and every command typed on the machine with its result. They wait

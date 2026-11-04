@@ -14,6 +14,12 @@ const (
 	AgentEventLevelWarn  AgentEventLevel = "warn"
 )
 
+// Defines values for AgentStatusNetwork.
+const (
+	Devnet  AgentStatusNetwork = "devnet"
+	Mainnet AgentStatusNetwork = "mainnet"
+)
+
 // Defines values for CheckStatus.
 const (
 	CheckStatusFail CheckStatus = "fail"
@@ -66,24 +72,40 @@ type AgentEventsBody struct {
 // AgentInfo defines model for AgentInfo.
 type AgentInfo struct {
 	// Commands The command verbs this agent accepts
-	Commands []string     `json:"commands"`
-	Update   UpdateStatus `json:"update"`
-	Version  string       `json:"version"`
+	Commands []string       `json:"commands"`
+	Settings *AgentSettings `json:"settings,omitempty"`
+	Update   UpdateStatus   `json:"update"`
+	Version  string         `json:"version"`
+}
+
+// AgentRegistration defines model for AgentRegistration.
+type AgentRegistration struct {
+	Registration *Registration `json:"registration,omitempty"`
+}
+
+// AgentSettings defines model for AgentSettings.
+type AgentSettings struct {
+	// AutoUpdate The agent installs new releases by itself; off, it only reports them
+	AutoUpdate bool `json:"autoUpdate"`
 }
 
 // AgentStatus defines model for AgentStatus.
 type AgentStatus struct {
-	Agent   AgentInfo     `json:"agent"`
-	Checks  []Check       `json:"checks"`
-	Disk    DiskStatus    `json:"disk"`
-	Gpu     GpuStatus     `json:"gpu"`
-	Node    NodeStatus    `json:"node"`
-	Runtime RuntimeStatus `json:"runtime"`
+	Agent   AgentInfo           `json:"agent"`
+	Checks  []Check             `json:"checks"`
+	Disk    DiskStatus          `json:"disk"`
+	Gpu     GpuStatus           `json:"gpu"`
+	Network *AgentStatusNetwork `json:"network,omitempty"`
+	Node    NodeStatus          `json:"node"`
+	Runtime RuntimeStatus       `json:"runtime"`
 
 	// Version The status document version
 	Version int           `json:"version"`
 	Wallet  *WalletStatus `json:"wallet,omitempty"`
 }
+
+// AgentStatusNetwork defines model for AgentStatus.Network.
+type AgentStatusNetwork string
 
 // Check defines model for Check.
 type Check struct {
@@ -167,6 +189,13 @@ type NodeStatus struct {
 // NodeStatusDesired defines model for NodeStatus.Desired.
 type NodeStatusDesired string
 
+// Registration defines model for Registration.
+type Registration struct {
+	Discord *string `json:"discord,omitempty"`
+	Email   string  `json:"email"`
+	Twitter *string `json:"twitter,omitempty"`
+}
+
 // RuntimeStatus defines model for RuntimeStatus.
 type RuntimeStatus struct {
 	Bundle        *string `json:"bundle,omitempty"`
@@ -176,10 +205,12 @@ type RuntimeStatus struct {
 
 // UpdateStatus defines model for UpdateStatus.
 type UpdateStatus struct {
-	Detail        *string `json:"detail,omitempty"`
-	LatestVersion *string `json:"latestVersion,omitempty"`
+	// CheckedAt When the release manifest was last read
+	CheckedAt     *time.Time `json:"checkedAt,omitempty"`
+	Detail        *string    `json:"detail,omitempty"`
+	LatestVersion *string    `json:"latestVersion,omitempty"`
 
-	// State idle | checking | downloading | pending | deferred | halted | error
+	// State idle | checking | available (a newer release while auto-update is off) | downloading | pending | deferred | halted | error
 	State string `json:"state"`
 }
 
@@ -188,7 +219,10 @@ type WalletStatus struct {
 	// Error Why the last read failed; sol and readAt stay the last good reading
 	Error *string `json:"error,omitempty"`
 
-	// ReadAt When sol was read
+	// Nos The node wallet's NOS balance at readAt
+	Nos *float64 `json:"nos,omitempty"`
+
+	// ReadAt When the balances were read
 	ReadAt *time.Time `json:"readAt,omitempty"`
 
 	// Sol The node wallet's SOL balance at readAt; the node needs 0.005 SOL
@@ -226,6 +260,16 @@ type PostAgentHeartbeatParams struct {
 	Authorization string `json:"authorization"`
 }
 
+// GetAgentRegistrationParams defines parameters for GetAgentRegistration.
+type GetAgentRegistrationParams struct {
+	Authorization string `json:"authorization"`
+}
+
+// PutAgentRegistrationParams defines parameters for PutAgentRegistration.
+type PutAgentRegistrationParams struct {
+	Authorization string `json:"authorization"`
+}
+
 // PostAgentClaimJSONRequestBody defines body for PostAgentClaim for application/json ContentType.
 type PostAgentClaimJSONRequestBody = ClaimBody
 
@@ -237,3 +281,6 @@ type PostAgentEventsJSONRequestBody = AgentEventsBody
 
 // PostAgentHeartbeatJSONRequestBody defines body for PostAgentHeartbeat for application/json ContentType.
 type PostAgentHeartbeatJSONRequestBody = HeartbeatBody
+
+// PutAgentRegistrationJSONRequestBody defines body for PutAgentRegistration for application/json ContentType.
+type PutAgentRegistrationJSONRequestBody = Registration

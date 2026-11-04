@@ -9,7 +9,7 @@ import (
 func TestWalletBalanceKeepsLastReadingOnError(t *testing.T) {
 	var sol float64
 	var err error
-	w := &walletBalance{read: func(context.Context) (float64, error) { return sol, err }}
+	w := &walletBalance{read: func(context.Context) (float64, float64, error) { return sol, sol * 100, err }}
 	if w.status() != nil {
 		t.Fatal("status before the first read should be nil")
 	}
@@ -17,14 +17,14 @@ func TestWalletBalanceKeepsLastReadingOnError(t *testing.T) {
 	sol = 0.002
 	w.refresh(context.Background())
 	s := w.status()
-	if s.Sol == nil || *s.Sol != 0.002 || s.ReadAt == nil || s.Error != nil {
+	if s.Sol == nil || *s.Sol != 0.002 || *s.Nos != 0.2 || s.ReadAt == nil || s.Error != nil {
 		t.Fatalf("after a good read: %+v", s)
 	}
 
 	err = errors.New("rpc down")
 	w.refresh(context.Background())
 	s = w.status()
-	if s.Sol == nil || *s.Sol != 0.002 || s.ReadAt == nil || s.Error == nil || *s.Error != "rpc down" {
+	if s.Sol == nil || *s.Sol != 0.002 || *s.Nos != 0.2 || s.ReadAt == nil || s.Error == nil || *s.Error != "rpc down" {
 		t.Fatalf("after a failed read: %+v", s)
 	}
 

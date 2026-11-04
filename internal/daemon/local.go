@@ -18,6 +18,7 @@ import (
 	"github.com/nosana-ci/host-agent/internal/doctor"
 	"github.com/nosana-ci/host-agent/internal/local"
 	"github.com/nosana-ci/host-agent/internal/node"
+	"github.com/nosana-ci/host-agent/internal/podman"
 	"github.com/nosana-ci/host-agent/internal/service"
 	"github.com/nosana-ci/host-agent/internal/version"
 )
@@ -86,11 +87,23 @@ func (d *daemon) localHandler() http.Handler {
 			writeJSON(w, checks)
 		}
 	})
+	mux.HandleFunc("GET /config", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, d.configView())
+	})
+	// The node's registration as host-manager has it, for the CLI to show and edit.
+	mux.HandleFunc("GET /registration", func(w http.ResponseWriter, r *http.Request) {
+		reg, err := d.ctrl.Registration(r.Context())
+		if err != nil {
+			http.Error(w, "registration: "+linkedErr(err).Error(), http.StatusBadGateway)
+			return
+		}
+		writeJSON(w, api.AgentRegistration{Registration: reg})
+	})
 	// The node's registration from the CLI, which had the owner accept the Participation Agreement.
 	// It does not touch the node, so it skips the command queue.
 	mux.HandleFunc("POST /register", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
-		reg := control.Registration{Email: strings.TrimSpace(q.Get("email")), Discord: strings.TrimSpace(q.Get("discord")), Twitter: strings.TrimSpace(q.Get("twitter"))}
+		reg := api.Registration{Email: strings.TrimSpace(q.Get("email")), Discord: optional(q.Get("discord")), Twitter: optional(q.Get("twitter"))}
 		switch {
 		case q.Get("accept") != "1":
 			http.Error(w, "the Participation Agreement has to be accepted first", http.StatusBadRequest)
@@ -98,10 +111,7 @@ func (d *daemon) localHandler() http.Handler {
 			http.Error(w, fmt.Sprintf("%q is not an email address", reg.Email), http.StatusBadRequest)
 		default:
 			if err := d.ctrl.Register(r.Context(), reg); err != nil {
-				var he *control.HTTPError
-				if errors.As(err, &he) && he.Status == http.StatusInternalServerError {
-					err = errors.New("host-manager refused it; a node that registered before cannot register again")
-				}
+				err = linkedErr(err)
 				d.recordCLI("register", api.CommandResult{Message: "register: " + err.Error()})
 				http.Error(w, "register: "+err.Error(), http.StatusBadGateway)
 				return
@@ -113,24 +123,56 @@ func (d *daemon) localHandler() http.Handler {
 		}
 	})
 	mux.HandleFunc("GET /logs/{what}", func(w http.ResponseWriter, r *http.Request) {
-		tail, _ := strconv.Atoi(r.URL.Query().Get("tail")) // 0 or missing: everything
-		follow := r.URL.Query().Get("follow") == "true"
-		out := flushWriter{w}
-		var err error
-		switch r.PathValue("what") {
-		case "node":
-			err = d.pc.Logs(r.Context(), node.ContainerName, tail, follow, out)
-		case "agent":
-			err = service.Journal(r.Context(), tail, follow, out)
-		default:
-			http.NotFound(w, r)
-			return
-		}
-		if err != nil && r.Context().Err() == nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
-		}
+		d.logs(w, r, r.PathValue("what"), "")
+	})
+	mux.HandleFunc("GET /logs/job/{id}", func(w http.ResponseWriter, r *http.Request) {
+		d.logs(w, r, "job", r.PathValue("id"))
 	})
 	return mux
+}
+
+// logs streams one log: the node container, the agent's or podman's journal, or a job's main
+// container, which the node names "<job id>-0" after the operation index.
+func (d *daemon) logs(w http.ResponseWriter, r *http.Request, what, jobID string) {
+	tail, _ := strconv.Atoi(r.URL.Query().Get("tail")) // 0 or missing: everything
+	follow := r.URL.Query().Get("follow") == "true"
+	out := flushWriter{w}
+	var err error
+	switch what {
+	case "node":
+		err = d.pc.Logs(r.Context(), node.ContainerName, tail, follow, out)
+	case "job":
+		err = d.pc.Logs(r.Context(), jobID+"-0", tail, follow, out)
+	case "agent":
+		err = service.Journal(r.Context(), service.AgentUnit, tail, follow, out)
+	case "podman":
+		err = service.Journal(r.Context(), service.PodmanUnit, tail, follow, out)
+	default:
+		http.NotFound(w, r)
+		return
+	}
+	if errors.Is(err, podman.ErrNotFound) {
+		http.Error(w, "no such container; a job's log is kept only while its container exists", http.StatusNotFound)
+		return
+	}
+	if err != nil && r.Context().Err() == nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+	}
+}
+
+// linkedErr explains host-manager not knowing the host: the registration goes through the link.
+func linkedErr(err error) error {
+	if errors.Is(err, control.ErrUnknownHost) {
+		return errors.New("this host is not linked to an account yet; run the install command from the console first")
+	}
+	return err
+}
+
+func optional(s string) *string {
+	if s = strings.TrimSpace(s); s == "" {
+		return nil
+	}
+	return &s
 }
 
 // runQueued hands a CLI command to commandLoop, so it runs one at a time with the console's and is
