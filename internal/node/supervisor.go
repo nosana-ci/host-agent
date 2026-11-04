@@ -254,7 +254,11 @@ func (s *Supervisor) reconcile(ctx context.Context) error {
 		if restart {
 			s.restartDone() // creating is the restart
 		}
-		return s.create(ctx, image)
+		if err := s.create(ctx, image); err != nil {
+			return err
+		}
+		s.st.Info("node", "node container created on image %s", image)
+		return nil
 	case restart:
 		slog.Info("node: restarting")
 		if err := s.pc.StopContainer(ctx, ContainerName, stopTimeout); err != nil {
@@ -273,7 +277,11 @@ func (s *Supervisor) reconcile(ctx context.Context) error {
 			return err
 		}
 		s.ChangeApplied()
-		return s.create(ctx, image)
+		if err := s.create(ctx, image); err != nil {
+			return err
+		}
+		s.st.Info("node", "node restarted on image %s", image)
+		return nil
 	case ctr.State.Running:
 		s.mu.Lock()
 		if s.crashes > 0 && time.Since(ctr.State.StartedAt) > stableAfter {
@@ -305,6 +313,7 @@ func (s *Supervisor) restartExited(ctx context.Context, code int) error {
 		s.status.LastError = &msg
 		s.mu.Unlock()
 		slog.Warn("node: crashed", "code", code, "restartIn", delay)
+		s.st.Warn("node", "%s", msg)
 		return nil
 	}
 	due := time.Now().After(s.nextStart)

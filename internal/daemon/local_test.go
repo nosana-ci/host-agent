@@ -54,7 +54,7 @@ func TestLocalDoctorFixIsQueued(t *testing.T) {
 			return
 		}
 		d.mu.Lock()
-		d.checks = []api.Check{{Id: "podman", Status: api.Ok}}
+		d.checks = []api.Check{{Id: "podman", Status: api.CheckStatusOk}}
 		d.mu.Unlock()
 		j.answer(api.CommandResult{Ok: true})
 	}()

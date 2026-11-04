@@ -63,6 +63,11 @@ Install script: `host-console/static/install.sh`.
   The heartbeat lists them, so the console shows what this agent can do. The CLI's
   `node start|stop|restart` and `update` are the same commands: they wait in the
   same queue and run one at a time with the console's.
+- **Events.** What the agent does by itself or for its CLI goes to the console's Activity: its
+  start, an automatic update and whether it was kept or rolled back, a runtime switch, a node crash,
+  a new node container or image, and every command typed on the machine with its result. They wait
+  in `state.json` (at most 200) until host-manager took them, so the events around an agent switch
+  survive the exec.
 
 - **Updates.** Every 10 minutes the agent reads `stable.json` from the release URL, verifies its signature with
   the release key built into it, and installs a newer agent right away: download, sha256, a

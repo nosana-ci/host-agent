@@ -50,10 +50,11 @@ func verbs() []string {
 }
 
 // job is a command and where its answer goes: host-manager for the console's, the socket for the
-// CLI's.
+// CLI's. A CLI command is also recorded as an event, since host-manager has no record of it.
 type job struct {
 	api.AgentCommand
 	answer func(api.CommandResult)
+	cli    bool
 }
 
 func (d *daemon) runJobs(ctx context.Context, jobs []job) {
@@ -63,9 +64,21 @@ func (d *daemon) runJobs(ctx context.Context, jobs []job) {
 		if err != nil {
 			result.Message = err.Error()
 		}
-		slog.Info("command", "verb", j.Verb, "ok", result.Ok, "message", result.Message)
+		slog.Info("command", "verb", j.Verb, "ok", result.Ok, "message", result.Message, "cli", j.cli)
+		if j.cli {
+			d.recordCLI(j.Verb, result)
+		}
 		j.answer(result)
 	}
+}
+
+// recordCLI records a command typed on the machine as an event.
+func (d *daemon) recordCLI(verb string, result api.CommandResult) {
+	level := "info"
+	if !result.Ok {
+		level = "error"
+	}
+	d.st.Record("command", level, verb, "%s", result.Message)
 }
 
 func (d *daemon) run(ctx context.Context, c api.AgentCommand) (string, error) {

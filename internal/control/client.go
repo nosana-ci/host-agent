@@ -1,5 +1,5 @@
-// Package control talks to host-manager: the claim, heartbeats, the command long-poll and command
-// results. Every request is signed with the node wallet, the way the node itself talks to host-manager.
+// Package control talks to host-manager: the claim, heartbeats, the command long-poll, command
+// results and the agent's events. Every request is signed with the node wallet, the way the node itself talks to host-manager.
 package control
 
 import (
@@ -79,6 +79,12 @@ func (c *Client) Register(ctx context.Context, r Registration) error {
 
 func (c *Client) Report(ctx context.Context, id int, result api.CommandResult) error {
 	return c.signed(ctx, http.MethodPost, "/agent/commands/"+strconv.Itoa(id)+"/result", result, nil)
+}
+
+// Events reports what the agent did by itself or for its CLI; host-manager stores an event it got
+// before once.
+func (c *Client) Events(ctx context.Context, events []api.AgentEvent) error {
+	return c.signed(ctx, http.MethodPost, "/agent/events", api.AgentEventsBody{Events: events}, nil)
 }
 
 // signed sends a request with the SDK authorization header: the address, the base58 signature

@@ -82,9 +82,12 @@ func Run(ctx context.Context) error {
 	}
 	d.cli = &http.Server{Handler: d.localHandler(), ReadHeaderTimeout: 5 * time.Second}
 	slog.Info("nosana-host", "version", version.Version, "node", d.address, "control", cfg.ControlURL)
+	if p := st.State().Update.Pending; p == nil || p.Version != version.Version { // an update says so itself
+		st.Info("agent", "agent %s started", version.Version)
+	}
 
 	var wg sync.WaitGroup
-	for _, run := range []func(context.Context){d.sup.Run, d.upd.Run, d.bal.run, d.doctorLoop, d.heartbeatLoop, d.pollLoop, d.commandLoop, d.serveLocal} {
+	for _, run := range []func(context.Context){d.sup.Run, d.upd.Run, d.bal.run, d.doctorLoop, d.heartbeatLoop, d.pollLoop, d.commandLoop, d.eventLoop, d.serveLocal} {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -201,7 +204,7 @@ func (d *daemon) queue(ctx context.Context, cmds []api.AgentCommand) {
 	}
 	jobs := make([]job, len(cmds))
 	for i, c := range cmds {
-		jobs[i] = job{c, func(result api.CommandResult) {
+		jobs[i] = job{AgentCommand: c, answer: func(result api.CommandResult) {
 			if err := d.ctrl.Report(ctx, c.Id, result); err != nil {
 				slog.Warn("report command result", "id", c.Id, "err", err)
 			}

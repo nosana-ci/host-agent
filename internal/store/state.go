@@ -11,12 +11,13 @@ import (
 
 // State is what the agent remembers between runs, in agent/state.json.
 type State struct {
-	Claimed     bool   `json:"claimed"`
-	ClaimToken  string `json:"claimToken,omitempty"` // from the installer, until it was used
-	NodeStopped bool   `json:"nodeStopped"`
-	NodeRestart bool   `json:"nodeRestart,omitempty"` // asked for, not done yet
-	NodeImage   string `json:"nodeImage,omitempty"`   // from the release manifest
-	Update      Update `json:"update"`
+	Claimed     bool    `json:"claimed"`
+	ClaimToken  string  `json:"claimToken,omitempty"` // from the installer, until it was used
+	NodeStopped bool    `json:"nodeStopped"`
+	NodeRestart bool    `json:"nodeRestart,omitempty"` // asked for, not done yet
+	NodeImage   string  `json:"nodeImage,omitempty"`   // from the release manifest
+	Update      Update  `json:"update"`
+	Events      []Event `json:"events,omitempty"` // not yet taken by host-manager
 }
 
 // Update is the self-update bookkeeping: the version that must still prove itself, the ones
@@ -42,10 +43,11 @@ type Store struct {
 	path  string
 	mu    sync.Mutex
 	state State
+	added chan struct{} // an event was recorded
 }
 
 func Open(path string) (*Store, error) {
-	s := &Store{path: path}
+	s := &Store{path: path, added: make(chan struct{}, 1)}
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return s, nil

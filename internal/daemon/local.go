@@ -15,6 +15,7 @@ import (
 
 	"github.com/nosana-ci/host-agent/internal/api"
 	"github.com/nosana-ci/host-agent/internal/control"
+	"github.com/nosana-ci/host-agent/internal/doctor"
 	"github.com/nosana-ci/host-agent/internal/local"
 	"github.com/nosana-ci/host-agent/internal/node"
 	"github.com/nosana-ci/host-agent/internal/service"
@@ -68,7 +69,9 @@ func (d *daemon) localHandler() http.Handler {
 	mux.HandleFunc("POST /doctor", func(w http.ResponseWriter, r *http.Request) {
 		id := r.URL.Query().Get("fix")
 		if id == "" {
-			writeJSON(w, d.runDoctor(r.Context()))
+			checks := d.runDoctor(r.Context())
+			d.recordCLI("run-doctor", api.CommandResult{Ok: true, Message: doctor.Summary(checks)})
+			writeJSON(w, checks)
 			return
 		}
 		result, ok := d.runQueued(r.Context(), api.AgentCommand{Verb: "fix-check", Args: map[string]any{"id": id}})
@@ -99,11 +102,14 @@ func (d *daemon) localHandler() http.Handler {
 				if errors.As(err, &he) && he.Status == http.StatusInternalServerError {
 					err = errors.New("host-manager refused it; a node that registered before cannot register again")
 				}
+				d.recordCLI("register", api.CommandResult{Message: "register: " + err.Error()})
 				http.Error(w, "register: "+err.Error(), http.StatusBadGateway)
 				return
 			}
 			slog.Info("registered the node", "email", reg.Email)
-			writeJSON(w, api.CommandResult{Ok: true, Message: "registered the node as " + reg.Email})
+			result := api.CommandResult{Ok: true, Message: "registered the node as " + reg.Email}
+			d.recordCLI("register", result)
+			writeJSON(w, result)
 		}
 	})
 	mux.HandleFunc("GET /logs/{what}", func(w http.ResponseWriter, r *http.Request) {
@@ -132,7 +138,7 @@ func (d *daemon) localHandler() http.Handler {
 func (d *daemon) runQueued(ctx context.Context, c api.AgentCommand) (result api.CommandResult, ok bool) {
 	answer := make(chan api.CommandResult, 1)
 	select {
-	case d.cmds <- []job{{c, func(result api.CommandResult) { answer <- result }}}:
+	case d.cmds <- []job{{AgentCommand: c, answer: func(result api.CommandResult) { answer <- result }, cli: true}}:
 	case <-ctx.Done():
 		return result, false
 	}
