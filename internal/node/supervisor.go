@@ -246,6 +246,9 @@ func (s *Supervisor) reconcile(ctx context.Context) error {
 			slog.Info("node: stopping")
 			return s.pc.StopContainer(ctx, ContainerName, stopTimeout)
 		}
+		s.mu.Lock()
+		s.status.LastError = nil // stopped as wanted: an earlier error (podman still starting at boot) is over
+		s.mu.Unlock()
 		return nil
 	case ctr == nil:
 		if restart {
