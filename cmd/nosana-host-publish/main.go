@@ -40,6 +40,7 @@ func run(args []string) error {
 	fs := flag.NewFlagSet("nosana-host-publish", flag.ExitOnError)
 	var m manifest.Manifest
 	fs.StringVar(&m.Version, "version", "", "agent version")
+	fs.StringVar(&m.Notes, "notes", "", "what is new in this release, shown to owners before they update")
 	fs.StringVar(&m.Agent.Artifacts.LinuxAmd64.Url, "agent", "", "URL of the linux-amd64 agent binary")
 	fs.StringVar(&m.Agent.Artifacts.LinuxAmd64.Sha256, "agent-sha", "", "its sha256")
 	fs.StringVar(&m.Runtime.Version, "runtime-version", "", "runtime bundle version")

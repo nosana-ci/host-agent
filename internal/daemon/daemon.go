@@ -40,6 +40,8 @@ type daemon struct {
 	upd     *updater.Updater
 	ctrl    *control.Client
 	bal     *walletBalance
+	reach   *reach
+	storage *storage
 	cmds    chan []job
 	cli     *http.Server // the CLI socket
 
@@ -73,11 +75,13 @@ func Run(ctx context.Context) error {
 	sup.WaitingForSOL = bal.waitingForSOL
 	d := &daemon{
 		cfg: cfg, address: keys.Address(wallet), st: st, pc: pc, sup: sup,
-		upd:  updater.New(cfg, st, sup, pc),
-		ctrl: control.New(cfg.ControlURL, wallet),
-		bal:  bal,
-		cmds: make(chan []job, 16),
-		auto: cfg.AutoUpdateOn(),
+		upd:     updater.New(cfg, st, sup, pc),
+		ctrl:    control.New(cfg.ControlURL, wallet),
+		bal:     bal,
+		reach:   &reach{url: NodeDomain(cfg.Network, keys.Address(wallet)), address: keys.Address(wallet)},
+		storage: newStorage(pc),
+		cmds:    make(chan []job, 16),
+		auto:    cfg.AutoUpdateOn(),
 		// host-manager wants arrays before the first doctor run too
 		gpu:    api.GpuStatus{Gpus: []api.Gpu{}},
 		checks: []api.Check{},
@@ -90,7 +94,7 @@ func Run(ctx context.Context) error {
 	}
 
 	var wg sync.WaitGroup
-	for _, run := range []func(context.Context){d.sup.Run, d.upd.Run, d.bal.run, d.doctorLoop, d.heartbeatLoop, d.pollLoop, d.commandLoop, d.eventLoop, d.serveLocal} {
+	for _, run := range []func(context.Context){d.sup.Run, d.upd.Run, d.bal.run, d.reach.run, d.storage.run, d.rebootLoop, d.doctorLoop, d.heartbeatLoop, d.pollLoop, d.commandLoop, d.eventLoop, d.serveLocal} {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -254,16 +258,22 @@ func (d *daemon) status(ctx context.Context) api.AgentStatus {
 	g, checks, settings := d.gpu, d.checks, api.AgentSettings{AutoUpdate: d.auto}
 	d.mu.Unlock()
 	network := api.AgentStatusNetwork(d.cfg.Network)
+	n := d.sup.Status()
+	n.Reach = d.reach.status()
+	if c := d.reach.check(n.Container == "running"); c != nil {
+		checks = append(checks[:len(checks):len(checks)], *c)
+	}
 	return api.AgentStatus{
 		Version: 1,
 		Agent:   api.AgentInfo{Version: version.Version, Commands: d.verbs(), Update: d.upd.Status(), Settings: &settings},
-		Node:    d.sup.Status(),
+		Node:    n,
 		Gpu:     g,
 		Disk:    doctor.Disk(),
 		Checks:  checks,
 		Runtime: d.runtimeStatus(ctx),
 		Wallet:  d.bal.status(),
 		Network: &network,
+		System:  d.systemStatus(),
 	}
 }
 
@@ -277,6 +287,7 @@ func (d *daemon) runtimeStatus(ctx context.Context) api.RuntimeStatus {
 	if info, err := d.pc.Info(ctx); err == nil {
 		st.Reachable = true
 		st.PodmanVersion = &info.Version.Version
+		st.Storage = d.storage.status()
 	}
 	return st
 }

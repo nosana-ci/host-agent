@@ -67,7 +67,7 @@ func (u *Updater) Status() api.UpdateStatus {
 func (u *Updater) set(state, detail string) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	u.status = api.UpdateStatus{State: state, LatestVersion: u.status.LatestVersion, CheckedAt: u.status.CheckedAt}
+	u.status = api.UpdateStatus{State: state, LatestVersion: u.status.LatestVersion, CheckedAt: u.status.CheckedAt, Notes: u.status.Notes}
 	if detail != "" {
 		u.status.Detail = &detail
 	}
@@ -201,7 +201,10 @@ func (u *Updater) fetch(ctx context.Context) (*manifest.Manifest, error) {
 	}
 	now := time.Now().UTC()
 	u.mu.Lock()
-	u.status.LatestVersion, u.status.CheckedAt = &m.Version, &now
+	u.status.LatestVersion, u.status.CheckedAt, u.status.Notes = &m.Version, &now, nil
+	if m.Notes != "" {
+		u.status.Notes = &m.Notes
+	}
 	u.mu.Unlock()
 	return m, nil
 }

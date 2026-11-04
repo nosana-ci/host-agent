@@ -39,6 +39,8 @@ nosana-host update [--check]       # install the current release now; --check on
 nosana-host config [set auto-update on|off]   # the settings and the install's values
 nosana-host register [--show]      # the node's email (and Discord, Twitter) and the Participation Agreement; shows and changes them later
 nosana-host airdrop                # devnet only: ask the faucet for SOL
+nosana-host runtime [df|prune|restart|reset]   # podman's storage: what it holds, free what nothing uses, restart podman, wipe it
+nosana-host reboot [--cancel]      # reboot the machine once the node is between jobs
 sudo nosana-host uninstall [--purge]   # --purge deletes state too, after backing up the wallet into your home
 ```
 
@@ -65,10 +67,26 @@ Install script: `host-console/static/install.sh`.
   answer and through a 25 s long-poll; each is answered done or failed with a message.
 - **Commands.** `restart-node`, `stop-node`, `start-node`, `run-doctor`, `fix-check` (podman
   service restart, firewall tool install, nvidia-persistenced, NTP), `check-update`, `update` (also while
-  the node is busy), `set-config` (`auto-update` on or off) and, on devnet, `request-airdrop`.
+  the node is busy), `set-config` (`auto-update` on or off), `reboot-when-idle` and `cancel-reboot`,
+  `prune-images`, `restart-runtime`, `reset-storage` and, on devnet, `request-airdrop`.
   The heartbeat lists them, so the console shows what this agent can do. The CLI's
   `node start|stop|restart`, `update`, `config set` and `airdrop` are the same commands: they wait
   in the same queue and run one at a time with the console's.
+- **Node log.** Every 5 s the supervisor reads the node's last 60 log lines: what the node does now
+  (a benchmark and its step, the place in the market queue, the job it runs, a countdown to a
+  restart) goes into the heartbeat as `node.activity`, a node stuck at its sign-up prompt as
+  `node.prompt`, and the lines worth knowing (benchmark verdicts, market and queue, jobs) become
+  events of type node.
+- **Reach.** Every 2 minutes the agent asks the node's public domain
+  (`https://<address>.node.k8s.<prd|dev>.nos.ci/node/info`) whether it answers for this node, the
+  way jobs reach it; the result is `node.reach` and the `node-domain` check.
+- **Runtime storage.** Every minute podman's `system/df` is summed into `runtime.storage` (used,
+  what prune would free, the images and containers). `prune-images` removes containers that are
+  not running (the node's excepted) and images nothing uses; `reset-storage` stops the node, wipes
+  everything and starts it again (its wallet and state live outside podman's storage).
+- **Reboot.** `reboot-when-idle` is kept in `state.json`; the machine reboots once the node may be
+  interrupted (the same rule as updates), and the heartbeat says the reboot waits
+  (`system.rebootPending`). `system.rebootRequired` mirrors `/run/reboot-required`.
 - **Settings.** `/etc/nosana/host.json` holds the install's values (host-manager URL, release URL,
   network) and `autoUpdate`. With auto-update off the agent still reads the release every 10
   minutes and reports a newer one (update state `available`), but installs it only on `update`.

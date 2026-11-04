@@ -98,6 +98,7 @@ type AgentStatus struct {
 	Network *AgentStatusNetwork `json:"network,omitempty"`
 	Node    NodeStatus          `json:"node"`
 	Runtime RuntimeStatus       `json:"runtime"`
+	System  *SystemStatus       `json:"system,omitempty"`
 
 	// Version The status document version
 	Version int           `json:"version"`
@@ -115,10 +116,13 @@ type Check struct {
 	Fix *string `json:"fix,omitempty"`
 
 	// Fixable The agent applies the fix itself on fix-check
-	Fixable *bool       `json:"fixable,omitempty"`
-	Id      string      `json:"id"`
-	Status  CheckStatus `json:"status"`
-	Title   string      `json:"title"`
+	Fixable *bool `json:"fixable,omitempty"`
+
+	// Group system | runtime | network | gpu
+	Group  *string     `json:"group,omitempty"`
+	Id     string      `json:"id"`
+	Status CheckStatus `json:"status"`
+	Title  string      `json:"title"`
 }
 
 // CheckStatus defines model for Check.Status.
@@ -173,14 +177,30 @@ type HeartbeatBody struct {
 	Status AgentStatus `json:"status"`
 }
 
+// NodeActivity defines model for NodeActivity.
+type NodeActivity struct {
+	// Detail What the node's log says about it, in a few words
+	Detail string `json:"detail"`
+
+	// Kind benchmark | queue | job | restart
+	Kind  string    `json:"kind"`
+	Since time.Time `json:"since"`
+}
+
 // NodeStatus defines model for NodeStatus.
 type NodeStatus struct {
+	Activity *NodeActivity `json:"activity,omitempty"`
+
 	// Container missing | created | running | exited | unknown
 	Container string            `json:"container"`
 	Desired   NodeStatusDesired `json:"desired"`
 	Image     string            `json:"image"`
 	LastError *string           `json:"lastError,omitempty"`
-	Restarts  int               `json:"restarts"`
+
+	// Prompt registration: the node waits at its terminal sign-up prompt
+	Prompt   *string      `json:"prompt,omitempty"`
+	Reach    *ReachStatus `json:"reach,omitempty"`
+	Restarts int          `json:"restarts"`
 
 	// State The node's own state from /node/info
 	State *string `json:"state,omitempty"`
@@ -189,6 +209,16 @@ type NodeStatus struct {
 // NodeStatusDesired defines model for NodeStatus.Desired.
 type NodeStatusDesired string
 
+// ReachStatus defines model for ReachStatus.
+type ReachStatus struct {
+	CheckedAt time.Time `json:"checkedAt"`
+	Error     *string   `json:"error,omitempty"`
+
+	// Ok The node's public domain answers /node/info for this node
+	Ok  bool   `json:"ok"`
+	Url string `json:"url"`
+}
+
 // Registration defines model for Registration.
 type Registration struct {
 	Discord *string `json:"discord,omitempty"`
@@ -196,11 +226,52 @@ type Registration struct {
 	Twitter *string `json:"twitter,omitempty"`
 }
 
+// RuntimeContainer defines model for RuntimeContainer.
+type RuntimeContainer struct {
+	Image string `json:"image"`
+	Name  string `json:"name"`
+	State string `json:"state"`
+}
+
+// RuntimeImage defines model for RuntimeImage.
+type RuntimeImage struct {
+	InUse  bool    `json:"inUse"`
+	Ref    string  `json:"ref"`
+	SizeGb float64 `json:"sizeGb"`
+}
+
 // RuntimeStatus defines model for RuntimeStatus.
 type RuntimeStatus struct {
-	Bundle        *string `json:"bundle,omitempty"`
-	PodmanVersion *string `json:"podmanVersion,omitempty"`
-	Reachable     bool    `json:"reachable"`
+	Bundle        *string         `json:"bundle,omitempty"`
+	PodmanVersion *string         `json:"podmanVersion,omitempty"`
+	Reachable     bool            `json:"reachable"`
+	Storage       *RuntimeStorage `json:"storage,omitempty"`
+}
+
+// RuntimeStorage defines model for RuntimeStorage.
+type RuntimeStorage struct {
+	Containers []RuntimeContainer `json:"containers"`
+	Images     []RuntimeImage     `json:"images"`
+	ReadAt     time.Time          `json:"readAt"`
+
+	// ReclaimableGb What prune-images would free: unused images and exited job containers
+	ReclaimableGb float64 `json:"reclaimableGb"`
+
+	// UsedGb Images, containers and volumes together
+	UsedGb  float64 `json:"usedGb"`
+	Volumes int     `json:"volumes"`
+}
+
+// SystemStatus defines model for SystemStatus.
+type SystemStatus struct {
+	BootedAt       *time.Time `json:"bootedAt,omitempty"`
+	RebootPackages *[]string  `json:"rebootPackages,omitempty"`
+
+	// RebootPending Since when a reboot waits for the node to be idle
+	RebootPending *time.Time `json:"rebootPending,omitempty"`
+
+	// RebootRequired The distro asks for a reboot (/run/reboot-required)
+	RebootRequired bool `json:"rebootRequired"`
 }
 
 // UpdateStatus defines model for UpdateStatus.
@@ -209,6 +280,9 @@ type UpdateStatus struct {
 	CheckedAt     *time.Time `json:"checkedAt,omitempty"`
 	Detail        *string    `json:"detail,omitempty"`
 	LatestVersion *string    `json:"latestVersion,omitempty"`
+
+	// Notes The release notes of latestVersion
+	Notes *string `json:"notes,omitempty"`
 
 	// State idle | checking | available (a newer release while auto-update is off) | downloading | pending | deferred | halted | error
 	State string `json:"state"`

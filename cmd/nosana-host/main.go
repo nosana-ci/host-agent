@@ -46,6 +46,8 @@ Usage:
   nosana-host config [get KEY | set KEY on|off]   the settings (auto-update) and the install's values
   nosana-host register [--show] [--email E] [--discord D] [--twitter T] [--accept-agreement]   the node's contact details; asks on a terminal
   nosana-host airdrop                   ask the devnet faucet for SOL (devnet only)
+  nosana-host runtime [df|prune|restart|reset]   podman's storage; prune frees what nothing uses, reset wipes it (the node pulls its image again)
+  nosana-host reboot [--cancel]         reboot the machine once the node is between jobs
   nosana-host daemon                    run the agent (what the service runs)
   nosana-host version
 `
@@ -85,6 +87,14 @@ func main() {
 		err = cmdConfig(os.Args[2:])
 	case "airdrop":
 		err = cmdCommand("request-airdrop")
+	case "runtime":
+		err = cmdRuntime(os.Args[2:])
+	case "reboot":
+		if len(os.Args) > 2 && os.Args[2] == "--cancel" {
+			err = cmdCommand("cancel-reboot")
+		} else {
+			err = cmdCommand("reboot-when-idle")
+		}
 	case "daemon":
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 		defer stop()
@@ -137,6 +147,12 @@ func cmdStatus() error {
 		node += ", reports " + *n.State
 	}
 	row("node", node)
+	if n.Activity != nil {
+		row("", activityLine(*n.Activity))
+	}
+	if n.Prompt != nil {
+		row("", "waiting at its sign-up prompt: nosana-host register")
+	}
 	if n.Desired == api.Stopped {
 		row("", "stopped by the owner; nosana-host node start runs it again")
 	}
@@ -147,12 +163,25 @@ func cmdStatus() error {
 		row("", "last error: "+*n.LastError)
 	}
 
+	if r := n.Reach; r != nil {
+		if r.Ok {
+			row("reachable", "yes, at "+r.Url)
+		} else {
+			row("reachable", "no: "+*r.Error+" ("+r.Url+")")
+		}
+	}
 	row("gpu", gpuLine(st.Gpu))
 	runtime := "podman not answering"
 	if st.Runtime.PodmanVersion != nil {
 		runtime = "podman " + *st.Runtime.PodmanVersion
 	}
+	if sto := st.Runtime.Storage; sto != nil {
+		runtime += fmt.Sprintf(", %.1f GB in storage (%.1f GB unused)", sto.UsedGb, sto.ReclaimableGb)
+	}
 	row("runtime", runtime)
+	if sys := st.System; sys != nil && (sys.RebootRequired || sys.RebootPending != nil) {
+		row("reboot", rebootLine(*sys))
+	}
 	row("disk", fmt.Sprintf("%.0f GB free of %.0f GB on %s", st.Disk.FreeGb, st.Disk.TotalGb, st.Disk.Mount))
 	row("checks", doctor.Summary(st.Checks))
 	row("update", updateLine(st.Agent))
@@ -160,6 +189,41 @@ func cmdStatus() error {
 		row("rollback", s.LastRollback)
 	}
 	return nil
+}
+
+func activityLine(a api.NodeActivity) string {
+	switch a.Kind {
+	case "restart":
+		line := "restarts in " + time.Until(a.Since).Round(time.Second).String()
+		if a.Detail != "" {
+			line += " (" + a.Detail + ")"
+		}
+		return line
+	case "job":
+		return "running job " + a.Detail + " since " + ago(a.Since)
+	case "benchmark":
+		return "benchmark: " + a.Detail + " since " + ago(a.Since)
+	}
+	return a.Detail + " since " + ago(a.Since)
+}
+
+func rebootLine(s api.SystemStatus) string {
+	line := ""
+	if s.RebootRequired {
+		line = "the system asks for a reboot"
+		if s.RebootPackages != nil {
+			line += " (" + strings.Join(*s.RebootPackages, ", ") + ")"
+		}
+	}
+	if s.RebootPending != nil {
+		if line != "" {
+			line += "; "
+		}
+		line += "reboots once the node is idle, asked " + ago(*s.RebootPending)
+	} else if s.RebootRequired {
+		line += "; nosana-host reboot does it once the node is idle"
+	}
+	return line
 }
 
 func updateLine(a api.AgentInfo) string {
@@ -177,7 +241,61 @@ func updateLine(a api.AgentInfo) string {
 	if a.Settings != nil && !a.Settings.AutoUpdate {
 		line += " (auto-update off)"
 	}
+	if u.Notes != nil && u.LatestVersion != nil && *u.LatestVersion != version.Version {
+		line += "\n" + strings.ReplaceAll("what is new in "+*u.LatestVersion+": "+*u.Notes, "\n", "\n             ")
+	}
 	return line
+}
+
+// cmdRuntime shows podman's storage, or runs one of the console's runtime commands.
+func cmdRuntime(args []string) error {
+	what := "df"
+	if len(args) > 0 {
+		what = args[0]
+	}
+	switch what {
+	case "prune":
+		return cmdCommand("prune-images")
+	case "restart":
+		return cmdCommand("restart-runtime")
+	case "reset":
+		if isTerminal(os.Stdin) && !strings.EqualFold(ask(bufio.NewReader(os.Stdin), "This stops the node and removes every container, image and volume; the node pulls its image again. Continue? [y/N] "), "y") {
+			return nil
+		}
+		return cmdCommand("reset-storage")
+	case "df":
+	default:
+		return errors.New("usage: nosana-host runtime [df|prune|restart|reset]")
+	}
+	var s local.Status
+	if err := agent(http.MethodGet, "/status", nil, &s); err != nil {
+		return err
+	}
+	sto := s.Status.Runtime.Storage
+	if sto == nil {
+		return errors.New("the storage has not been read yet; podman may not be answering")
+	}
+	row("used", fmt.Sprintf("%.1f GB in %d image%s, %d container%s, %d volume%s", sto.UsedGb, len(sto.Images), plural(len(sto.Images)), len(sto.Containers), plural(len(sto.Containers)), sto.Volumes, plural(sto.Volumes)))
+	row("unused", fmt.Sprintf("%.1f GB; nosana-host runtime prune frees it", sto.ReclaimableGb))
+	for _, i := range sto.Images {
+		use := "unused"
+		if i.InUse {
+			use = "in use"
+		}
+		row("image", fmt.Sprintf("%-50s %6.1f GB  %s", i.Ref, i.SizeGb, use))
+	}
+	for _, c := range sto.Containers {
+		row("container", fmt.Sprintf("%-50s %s (%s)", c.Name, c.State, c.Image))
+	}
+	row("read", ago(sto.ReadAt))
+	return nil
+}
+
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }
 
 // ago says how long ago t was, in the coarse way a status line needs.

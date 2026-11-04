@@ -53,8 +53,20 @@ func Run(ctx context.Context, cfg config.Config, pc *podman.Client) (api.GpuStat
 			fixable := true
 			checks[i].Fixable = &fixable
 		}
+		group := groups[checks[i].Id]
+		if group == "" {
+			group = "gpu"
+		}
+		checks[i].Group = &group
 	}
 	return g, checks
+}
+
+// groups is the console's grouping of the checks; the GPU checks are the rest.
+var groups = map[string]string{
+	"os": "system", "cgroup": "system", "disk": "system", "clock": "system",
+	"podman": "runtime", "firewall": "runtime",
+	"control": "network", "registry": "network", "solana-rpc": "network",
 }
 
 var fixes = map[string]func(ctx context.Context) error{

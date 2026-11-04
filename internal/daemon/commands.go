@@ -57,6 +57,21 @@ var commands = []struct {
 		value, _ := args["value"].(string)
 		return d.setConfig(key, value)
 	}},
+	{"reboot-when-idle", false, func(d *daemon, _ context.Context, _ map[string]any) (string, error) {
+		return d.wantReboot()
+	}},
+	{"cancel-reboot", false, func(d *daemon, _ context.Context, _ map[string]any) (string, error) {
+		return d.cancelReboot()
+	}},
+	{"prune-images", false, func(d *daemon, ctx context.Context, _ map[string]any) (string, error) {
+		return d.prune(ctx)
+	}},
+	{"restart-runtime", false, func(d *daemon, ctx context.Context, _ map[string]any) (string, error) {
+		return d.restartRuntime(ctx)
+	}},
+	{"reset-storage", false, func(d *daemon, ctx context.Context, _ map[string]any) (string, error) {
+		return d.resetStorage(ctx)
+	}},
 	{"request-airdrop", true, func(d *daemon, ctx context.Context, _ map[string]any) (string, error) {
 		sig, err := solana.RequestAirdrop(ctx, solana.RPCURL(d.cfg.Network), d.address, airdropSOL)
 		if err != nil {
