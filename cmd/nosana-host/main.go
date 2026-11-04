@@ -275,7 +275,7 @@ func cmdDoctor(args []string) error {
 			line += ": " + *c.Detail
 		}
 		fmt.Println(line)
-		if c.Status != api.Ok && c.Fix != nil {
+		if c.Status != api.CheckStatusOk && c.Fix != nil {
 			fmt.Printf("     → %s", *c.Fix)
 			if c.Fixable != nil && *c.Fixable {
 				fmt.Printf("  (nosana-host doctor --fix %s)", c.Id)

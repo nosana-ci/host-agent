@@ -7,11 +7,18 @@ import (
 	"time"
 )
 
+// Defines values for AgentEventLevel.
+const (
+	AgentEventLevelError AgentEventLevel = "error"
+	AgentEventLevelInfo  AgentEventLevel = "info"
+	AgentEventLevelWarn  AgentEventLevel = "warn"
+)
+
 // Defines values for CheckStatus.
 const (
-	Fail CheckStatus = "fail"
-	Ok   CheckStatus = "ok"
-	Warn CheckStatus = "warn"
+	CheckStatusFail CheckStatus = "fail"
+	CheckStatusOk   CheckStatus = "ok"
+	CheckStatusWarn CheckStatus = "warn"
 )
 
 // Defines values for NodeStatusDesired.
@@ -30,6 +37,30 @@ type AgentCommand struct {
 // AgentCommands defines model for AgentCommands.
 type AgentCommands struct {
 	Commands []AgentCommand `json:"commands"`
+}
+
+// AgentEvent defines model for AgentEvent.
+type AgentEvent struct {
+	At time.Time `json:"at"`
+
+	// Id The agent's id; a resent event is stored once
+	Id      string          `json:"id"`
+	Level   AgentEventLevel `json:"level"`
+	Message string          `json:"message"`
+
+	// Type agent, update, runtime, node or command (a command typed on the machine)
+	Type string `json:"type"`
+
+	// Verb The command, for type command
+	Verb *string `json:"verb,omitempty"`
+}
+
+// AgentEventLevel defines model for AgentEvent.Level.
+type AgentEventLevel string
+
+// AgentEventsBody defines model for AgentEventsBody.
+type AgentEventsBody struct {
+	Events []AgentEvent `json:"events"`
 }
 
 // AgentInfo defines model for AgentInfo.
@@ -185,6 +216,11 @@ type PostAgentCommandsByIdResultParamsId0 = string
 // PostAgentCommandsByIdResultParamsId1 defines parameters for PostAgentCommandsByIdResult.
 type PostAgentCommandsByIdResultParamsId1 = float32
 
+// PostAgentEventsParams defines parameters for PostAgentEvents.
+type PostAgentEventsParams struct {
+	Authorization string `json:"authorization"`
+}
+
 // PostAgentHeartbeatParams defines parameters for PostAgentHeartbeat.
 type PostAgentHeartbeatParams struct {
 	Authorization string `json:"authorization"`
@@ -195,6 +231,9 @@ type PostAgentClaimJSONRequestBody = ClaimBody
 
 // PostAgentCommandsByIdResultJSONRequestBody defines body for PostAgentCommandsByIdResult for application/json ContentType.
 type PostAgentCommandsByIdResultJSONRequestBody = CommandResult
+
+// PostAgentEventsJSONRequestBody defines body for PostAgentEvents for application/json ContentType.
+type PostAgentEventsJSONRequestBody = AgentEventsBody
 
 // PostAgentHeartbeatJSONRequestBody defines body for PostAgentHeartbeat for application/json ContentType.
 type PostAgentHeartbeatJSONRequestBody = HeartbeatBody

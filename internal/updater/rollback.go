@@ -47,6 +47,7 @@ func rollback(st *store.Store, reason string) {
 		s.Update.LastRollback = fmt.Sprintf("%s: back on %s", reason, binVersion(p.Previous))
 		s.Update.Pending = nil
 	})
+	st.Error("update", "%s; back on agent %s, and %s is skipped until a newer release", reason, binVersion(p.Previous), p.Version)
 	Exec()
 }
 

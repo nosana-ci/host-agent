@@ -152,6 +152,9 @@ func (u *Updater) Check(ctx context.Context, force bool) (string, error) {
 	if err := u.installAgent(ctx, m); err != nil {
 		return u.fail(err)
 	}
+	if !force { // an update the owner asked for is answered as the command's result
+		u.st.Info("update", "switching to agent %s (was %s) on its own; it is kept once it has run for %s", m.Version, version.Version, keepAfter)
+	}
 	return "switching to agent " + m.Version, nil
 }
 
@@ -189,7 +192,9 @@ func (u *Updater) installAgent(ctx context.Context, m *manifest.Manifest) error 
 			return ctx.Err()
 		}
 		_ = u.st.Update(func(s *store.State) { s.Update.Blocked = append(s.Update.Blocked, m.Version) })
-		return fmt.Errorf("agent %s does not run here (%v: %s); not switching to it", m.Version, err, strings.TrimSpace(string(out)))
+		err = fmt.Errorf("agent %s does not run here (%v: %s); not switching to it", m.Version, err, strings.TrimSpace(string(out)))
+		u.st.Error("update", "%v; it is skipped until a newer release", err)
+		return err
 	}
 	if err := u.st.Update(func(s *store.State) {
 		s.Update.Pending = &store.Pending{Version: m.Version, Previous: previous}
@@ -212,6 +217,7 @@ func (u *Updater) commit() {
 	_ = u.st.Update(func(s *store.State) { s.Update.Pending = nil })
 	pruneBinaries(p.Previous)
 	slog.Info("agent update committed", "version", version.Version, "was", binVersion(p.Previous))
+	u.st.Info("update", "agent updated to %s (was %s)", version.Version, binVersion(p.Previous))
 	u.set("idle", "")
 }
 
@@ -220,6 +226,11 @@ func (u *Updater) commit() {
 func (u *Updater) switchRuntime(ctx context.Context, ver, old string) error {
 	if err := u.activate(ctx, ver); err == nil {
 		slog.Info("runtime switched", "from", old, "to", ver)
+		if old == "" {
+			u.st.Info("runtime", "runtime %s installed", ver)
+		} else {
+			u.st.Info("runtime", "runtime switched to %s (was %s)", ver, old)
+		}
 		bundle.Prune(old)
 		return nil
 	}
@@ -231,13 +242,14 @@ func (u *Updater) switchRuntime(ctx context.Context, ver, old string) error {
 	}
 	slog.Warn("runtime did not come up; going back", "failed", ver, "to", old)
 	_ = u.st.Update(func(s *store.State) { s.Update.BlockedRuntime = append(s.Update.BlockedRuntime, ver) })
+	err := fmt.Errorf("runtime %s does not start; back on %s", ver, old)
 	if old == "" {
-		return fmt.Errorf("runtime %s does not start and there is nothing to go back to", ver)
+		err = fmt.Errorf("runtime %s does not start and there is nothing to go back to", ver)
+	} else if aerr := u.activate(ctx, old); aerr != nil {
+		err = fmt.Errorf("runtime %s does not start, and going back to %s failed: %w", ver, old, aerr)
 	}
-	if err := u.activate(ctx, old); err != nil {
-		return fmt.Errorf("runtime %s does not start, and going back to %s failed: %w", ver, old, err)
-	}
-	return fmt.Errorf("runtime %s does not start; back on %s", ver, old)
+	u.st.Error("runtime", "%v", err)
+	return err
 }
 
 func (u *Updater) activate(ctx context.Context, ver string) error {
