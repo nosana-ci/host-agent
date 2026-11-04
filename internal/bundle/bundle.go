@@ -86,15 +86,43 @@ func Prune(keep string) {
 }
 
 // FirewallDriver is the netavark firewall driver this host can run: the bundle cannot ship
-// nft or iptables.
+// iptables or nft. iptables comes first: docker and ufw keep their rules in the kernel's ip
+// filter table through iptables, with a FORWARD policy of DROP, and a drop there stands whatever
+// netavark's own nftables table accepts. The iptables driver puts its accept rules in that same
+// FORWARD chain, ahead of theirs.
 func FirewallDriver() string {
-	if _, err := exec.LookPath("nft"); err == nil {
-		return "nftables"
-	}
 	if _, err := exec.LookPath("iptables"); err == nil {
 		return "iptables"
 	}
+	if _, err := exec.LookPath("nft"); err == nil {
+		return "nftables"
+	}
 	return ""
+}
+
+// Stale reports whether the configuration written for bundle ver differs from what this host
+// gets now, e.g. because the firewall driver choice changed. Reconfigure brings it up to date.
+func Stale(ver string) bool {
+	for path, text := range render(filepath.Join(config.RuntimeDir, ver)) {
+		if cur, err := os.ReadFile(path); err != nil || string(cur) != text {
+			return true
+		}
+	}
+	return false
+}
+
+// Reconfigure rewrites the configuration of bundle ver. The podman service reads it at start.
+func Reconfigure(ver string) error { return configure(filepath.Join(config.RuntimeDir, ver)) }
+
+// DropStaleFirewallRules removes the rules netavark's nftables driver left once this host runs
+// the iptables driver, so the two do not stack. Containers get fresh rules when they restart.
+func DropStaleFirewallRules() {
+	if FirewallDriver() != "iptables" {
+		return
+	}
+	if nft, err := exec.LookPath("nft"); err == nil {
+		_ = exec.Command(nft, "delete", "table", "inet", "netavark").Run()
+	}
 }
 
 // jobLogSizeMax caps every container log the node creates through this podman.
@@ -103,6 +131,16 @@ const jobLogSizeMax = 50 << 20
 // configure writes the bundle's containers.conf, registries.conf and the env file the podman
 // unit loads, with absolute paths, so the bundle never relies on /etc/containers.
 func configure(dir string) error {
+	for path, text := range render(dir) {
+		if err := store.WriteFile(path, []byte(text), 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// render is the bundle's configuration for this host, by file.
+func render(dir string) map[string]string {
 	etc := filepath.Join(dir, "etc")
 	firewall := ""
 	if fw := FirewallDriver(); fw != "" {
@@ -130,20 +168,18 @@ runc = [%q]
 
 [network]
 network_backend = "netavark"
-%s`, filepath.Join(dir, "etc", "seccomp.json"), jobLogSizeMax,
+%s`, filepath.Join(etc, "seccomp.json"), jobLogSizeMax,
 		filepath.Join(dir, "lib", "podman"), filepath.Join(dir, "bin"),
 		filepath.Join(dir, "lib", "podman", "conmon"), config.PodmanTmpDir,
 		filepath.Join(dir, "bin", "crun"), filepath.Join(dir, "bin", "runc"), firewall)
-	if err := store.WriteFile(filepath.Join(etc, "containers.conf"), []byte(conf), 0o644); err != nil {
-		return err
-	}
 	reg := "# Written by nosana-host.\nunqualified-search-registries = [\"docker.io\"]\nshort-name-mode = \"permissive\"\n"
-	if err := store.WriteFile(filepath.Join(etc, "registries.conf"), []byte(reg), 0o644); err != nil {
-		return err
-	}
 	env := fmt.Sprintf("CONTAINERS_CONF=%s\nCONTAINERS_REGISTRIES_CONF=%s\nPATH=%s:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n",
-		filepath.Join(dir, "etc", "containers.conf"), filepath.Join(dir, "etc", "registries.conf"), filepath.Join(dir, "bin"))
-	return store.WriteFile(filepath.Join(dir, "env"), []byte(env), 0o644)
+		filepath.Join(etc, "containers.conf"), filepath.Join(etc, "registries.conf"), filepath.Join(dir, "bin"))
+	return map[string]string{
+		filepath.Join(etc, "containers.conf"): conf,
+		filepath.Join(etc, "registries.conf"): reg,
+		filepath.Join(dir, "env"):             env,
+	}
 }
 
 func smokeTest(ctx context.Context, dir string) error {

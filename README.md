@@ -18,7 +18,9 @@ reads the current release manifest, downloads the agent and checks its sha256, a
 
 1. puts the binary in `/var/lib/nosana/agent/bin/` and links `/usr/local/bin/nosana-host` to it;
 2. downloads the podman runtime bundle the release names into `/var/lib/nosana/runtime/<version>`
-   (hosts never install podman; `nftables` is installed when the host has no firewall tool);
+   (hosts never install podman; podman's firewall rules go through `iptables` when the host has
+   it, so they live next to docker's and ufw's, otherwise through `nft`; `nftables` is installed
+   when the host has neither);
 3. creates the node wallet (`/var/lib/nosana/node/nosana_key.json`) and the `nosana` group for the CLI;
 4. writes `/etc/nosana/host.json` (host-manager URL, network) and the two systemd units,
    `nosana-podman.service` and `nosana-host.service`, and starts them.
@@ -59,7 +61,7 @@ Install script: `host-console/static/install.sh`.
   Commands come back in the
   answer and through a 25 s long-poll; each is answered done or failed with a message.
 - **Commands.** `restart-node`, `stop-node`, `start-node`, `run-doctor`, `fix-check` (podman
-  service restart, nftables install, nvidia-persistenced), `update` (also while the node is busy).
+  service restart, firewall tool install, nvidia-persistenced), `update` (also while the node is busy).
   The heartbeat lists them, so the console shows what this agent can do. The CLI's
   `node start|stop|restart` and `update` are the same commands: they wait in the
   same queue and run one at a time with the console's.
@@ -72,8 +74,9 @@ Install script: `host-console/static/install.sh`.
 - **Updates.** Every 10 minutes the agent reads `stable.json` from the release URL, verifies its signature with
   the release key built into it, and installs a newer agent right away: download, sha256, a
   `version` run, then `bin/current` is relinked and the process execs the new binary in place; the
-  node keeps running. A new runtime bundle (switched back when podman does not come up within 45 s)
-  and a new node image stop the node, so they wait: always for a job or a benchmark, at most 24 h
+  node keeps running. A new runtime bundle (switched back when podman does not come up within 45 s),
+  a runtime configuration that no longer fits the host (its firewall driver) and a new node image
+  stop the node, so they wait: always for a job or a benchmark, at most 24 h
   for a node in the queue, joining a market, or running without answering `/node/info`, and not at
   all for a node waiting for SOL or not running. `update` from the console applies them at once. The new version is kept once it has been up for two
   minutes; three failed starts before that roll back to the previous binary and block that version

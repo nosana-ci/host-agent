@@ -77,15 +77,26 @@ func Fix(ctx context.Context, id string) error {
 	return fix(ctx)
 }
 
-// EnsureFirewallTool installs nftables when neither nft nor iptables is present.
+// EnsureFirewallTool installs nftables when neither iptables nor nft is present, and iptables
+// when podman's nftables rules are overruled by another firewall (see forwardDrops). The
+// updater restarts podman on the new driver once the node is between jobs.
 func EnsureFirewallTool(ctx context.Context) error {
-	if bundle.FirewallDriver() != "" {
+	pkg := ""
+	switch bundle.FirewallDriver() {
+	case "":
+		pkg = "nftables"
+	case "nftables":
+		if !forwardDrops() {
+			return nil
+		}
+		pkg = "iptables"
+	default:
 		return nil
 	}
 	if _, err := exec.LookPath("apt-get"); err != nil {
-		return errors.New("container networking needs nftables or iptables; install one of them")
+		return errors.New("container networking needs " + pkg + "; install it")
 	}
-	for _, args := range [][]string{{"update", "-qq"}, {"install", "-y", "-qq", "nftables"}} {
+	for _, args := range [][]string{{"update", "-qq"}, {"install", "-y", "-qq", pkg}} {
 		cmd := exec.CommandContext(ctx, "apt-get", args...)
 		cmd.Env = append(os.Environ(), "DEBIAN_FRONTEND=noninteractive")
 		if out, err := cmd.CombinedOutput(); err != nil {
@@ -182,10 +193,23 @@ func checkPodman(ctx context.Context, pc *podman.Client) api.Check {
 }
 
 func checkFirewall() api.Check {
-	if fw := bundle.FirewallDriver(); fw != "" {
-		return check("firewall", "Container networking (nftables or iptables)", api.CheckStatusOk, fw, "")
+	const title = "Container networking (iptables or nftables)"
+	fw := bundle.FirewallDriver()
+	switch {
+	case fw == "":
+		return check("firewall", title, api.CheckStatusFail, "neither iptables nor nft is installed", "Install nftables (the agent can do this).")
+	case fw == "nftables" && forwardDrops():
+		return check("firewall", title, api.CheckStatusFail, "nftables, but another firewall (docker, ufw) drops forwarded traffic: containers have no network", "Install iptables, which podman then shares with it (the agent can do this).")
 	}
-	return check("firewall", "Container networking (nftables or iptables)", api.CheckStatusFail, "neither nft nor iptables is installed", "Install nftables (the agent can do this).")
+	return check("firewall", title, api.CheckStatusOk, fw, "")
+}
+
+// forwardDrops reports whether the kernel's ip filter FORWARD chain, the one iptables users such
+// as docker and ufw manage, drops by policy. Netavark's nftables driver accepts in a table of its
+// own, which does not overrule that drop; its iptables driver accepts in this chain itself.
+func forwardDrops() bool {
+	out, err := exec.Command("nft", "list", "chain", "ip", "filter", "FORWARD").Output()
+	return err == nil && strings.Contains(string(out), "policy drop")
 }
 
 func checkReach(ctx context.Context, id, title, url string, expect int) api.Check {
