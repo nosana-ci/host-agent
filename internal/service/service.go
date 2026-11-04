@@ -3,10 +3,13 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/nosana-ci/host-agent/internal/config"
@@ -84,4 +87,20 @@ func Systemctl(args ...string) error {
 		return fmt.Errorf("systemctl %s: %v: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// Journal writes the agent's last tail lines of the journal (all when 0) to w, and keeps
+// following when follow is set, until ctx ends.
+func Journal(ctx context.Context, tail int, follow bool, w io.Writer) error {
+	lines := "all"
+	if tail > 0 {
+		lines = strconv.Itoa(tail)
+	}
+	args := []string{"-u", AgentUnit, "--no-pager", "-n", lines}
+	if follow {
+		args = append(args, "-f")
+	}
+	cmd := exec.CommandContext(ctx, "journalctl", args...)
+	cmd.Stdout, cmd.Stderr = w, w
+	return cmd.Run()
 }

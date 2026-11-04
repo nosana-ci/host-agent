@@ -19,7 +19,7 @@ reads the current release manifest, downloads the agent and checks its sha256, a
 1. puts the binary in `/var/lib/nosana/agent/bin/` and links `/usr/local/bin/nosana-host` to it;
 2. downloads the podman runtime bundle the release names into `/var/lib/nosana/runtime/<version>`
    (hosts never install podman; `nftables` is installed when the host has no firewall tool);
-3. creates the node wallet (`/var/lib/nosana/node/nosana_key.json`);
+3. creates the node wallet (`/var/lib/nosana/node/nosana_key.json`) and the `nosana` group for the CLI;
 4. writes `/etc/nosana/host.json` (host-manager URL, network) and the two systemd units,
    `nosana-podman.service` and `nosana-host.service`, and starts them.
 
@@ -29,10 +29,20 @@ newer), nvidia-container-toolkit and a CDI spec for the GPU; the console's healt
 what is missing.
 
 ```sh
-sudo nosana-host status            # node address, link, node container
-journalctl -u nosana-host -f       # the agent's log
+nosana-host status                 # what the console's host page shows: link, wallet, node, GPU, disk, checks, update
+nosana-host logs [node|agent] -f   # the node container's log, or the agent's journal
+nosana-host doctor [--fix ID]      # the host checks; --fix applies the fix of one check
+nosana-host node start|stop|restart   # the node container, like the console's buttons
+nosana-host update                 # install the current release now
+nosana-host register               # the node's email (and Discord, Twitter) and the Participation Agreement
 sudo nosana-host uninstall [--purge]   # --purge deletes state too, after backing up the wallet into your home
 ```
+
+Everything but install and uninstall talks to the running agent over `/run/nosana/cli.sock`, which belongs
+to root and the `nosana` group; the installer adds the user who ran it to that group (log in again
+once), so only install and uninstall need sudo. While the agent is down, `status` shows what the
+install wrote instead (with sudo also the node address and the link) and `logs agent` reads the
+journal directly.
 
 Install script: `host-console/static/install.sh`.
 
@@ -50,7 +60,9 @@ Install script: `host-console/static/install.sh`.
   answer and through a 25 s long-poll; each is answered done or failed with a message.
 - **Commands.** `restart-node`, `stop-node`, `start-node`, `run-doctor`, `fix-check` (podman
   service restart, nftables install, nvidia-persistenced), `update` (also while the node is busy).
-  The heartbeat lists them, so the console shows what this agent can do.
+  The heartbeat lists them, so the console shows what this agent can do. The CLI's
+  `node start|stop|restart` and `update` are the same commands: they wait in the
+  same queue and run one at a time with the console's.
 
 - **Updates.** Every 10 minutes the agent reads `stable.json` from the release URL, verifies its signature with
   the release key built into it, and installs a newer agent right away: download, sha256, a
@@ -76,7 +88,7 @@ The wire types in `internal/api/types.gen.go` are generated from host-manager's 
 `make api-types HOST_MANAGER=http://localhost:3005` (needs `jq`; the generator is a Go tool
 dependency).
 
-Layout: `cmd/nosana-host` (CLI), `cmd/nosana-host-publish` (release tool), `internal/manifest` (the release manifest), `internal/daemon`
+Layout: `cmd/nosana-host` (CLI), `cmd/nosana-host-publish` (release tool), `internal/manifest` (the release manifest), `internal/local` (the CLI socket), `internal/daemon`
 (wiring and the command table), `node` (supervisor), `control` (host-manager client and request
 signing), `updater` (self-update, rollback, runtime switch), `bundle` (the podman bundle),
 `doctor` (checks, fixes, GPU detection), `install`, `service` (systemd units), `store` (atomic files,

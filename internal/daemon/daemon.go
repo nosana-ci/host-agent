@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"sync"
 	"time"
@@ -31,14 +32,16 @@ const (
 )
 
 type daemon struct {
-	cfg  config.Config
-	st   *store.Store
-	pc   *podman.Client
-	sup  *node.Supervisor
-	upd  *updater.Updater
-	ctrl *control.Client
-	bal  *walletBalance
-	cmds chan []api.AgentCommand
+	cfg     config.Config
+	address string // the node address
+	st      *store.Store
+	pc      *podman.Client
+	sup     *node.Supervisor
+	upd     *updater.Updater
+	ctrl    *control.Client
+	bal     *walletBalance
+	cmds    chan []job
+	cli     *http.Server // the CLI socket
 
 	mu     sync.Mutex
 	gpu    api.GpuStatus
@@ -68,19 +71,20 @@ func Run(ctx context.Context) error {
 	bal := newWalletBalance(cfg.Network, keys.Address(wallet))
 	sup.WaitingForSOL = bal.waitingForSOL
 	d := &daemon{
-		cfg: cfg, st: st, pc: pc, sup: sup,
+		cfg: cfg, address: keys.Address(wallet), st: st, pc: pc, sup: sup,
 		upd:  updater.New(cfg, st, sup, pc),
 		ctrl: control.New(cfg.ControlURL, wallet),
 		bal:  bal,
-		cmds: make(chan []api.AgentCommand, 16),
+		cmds: make(chan []job, 16),
 		// host-manager wants arrays before the first doctor run too
 		gpu:    api.GpuStatus{Gpus: []api.Gpu{}},
 		checks: []api.Check{},
 	}
-	slog.Info("nosana-host", "version", version.Version, "node", keys.Address(wallet), "control", cfg.ControlURL)
+	d.cli = &http.Server{Handler: d.localHandler(), ReadHeaderTimeout: 5 * time.Second}
+	slog.Info("nosana-host", "version", version.Version, "node", d.address, "control", cfg.ControlURL)
 
 	var wg sync.WaitGroup
-	for _, run := range []func(context.Context){d.sup.Run, d.upd.Run, d.bal.run, d.doctorLoop, d.heartbeatLoop, d.pollLoop, d.commandLoop} {
+	for _, run := range []func(context.Context){d.sup.Run, d.upd.Run, d.bal.run, d.doctorLoop, d.heartbeatLoop, d.pollLoop, d.commandLoop, d.serveLocal} {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -188,35 +192,47 @@ func (d *daemon) pollLoop(ctx context.Context) {
 	}
 }
 
-// queue hands commands to commandLoop. host-manager delivers each command once, so the heartbeat
-// and the long-poll must not drop or run them themselves.
+// queue hands the console's commands to commandLoop, each answered to host-manager. host-manager
+// delivers each command once, so the heartbeat and the long-poll must not drop or run them
+// themselves.
 func (d *daemon) queue(ctx context.Context, cmds []api.AgentCommand) {
 	if len(cmds) == 0 {
 		return
 	}
+	jobs := make([]job, len(cmds))
+	for i, c := range cmds {
+		jobs[i] = job{c, func(result api.CommandResult) {
+			if err := d.ctrl.Report(ctx, c.Id, result); err != nil {
+				slog.Warn("report command result", "id", c.Id, "err", err)
+			}
+		}}
+	}
 	select {
-	case d.cmds <- cmds:
+	case d.cmds <- jobs:
 	case <-ctx.Done():
 	}
 }
 
-// commandLoop runs the queued commands one at a time, and switches to a new agent only when no
-// command is waiting: every command it took is answered before the process is replaced.
+// commandLoop runs the queued commands, from the console and the CLI, one at a time, and switches
+// to a new agent only when no command is waiting: every command it took is answered before the
+// process is replaced, the CLI's included.
 func (d *daemon) commandLoop(ctx context.Context) {
 	switching := false
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case cmds := <-d.cmds:
-			d.runCommands(ctx, cmds)
+		case jobs := <-d.cmds:
+			d.runJobs(ctx, jobs)
 		case <-d.upd.Ready():
 			switching = true
 		}
 		if switching && len(d.cmds) == 0 {
-			updater.Exec()
+			d.closeLocal()
+			if len(d.cmds) == 0 { // the CLI may have queued one while the socket closed
+				updater.Exec()
+			}
 		}
-
 	}
 }
 

@@ -20,6 +20,7 @@ import (
 	"github.com/nosana-ci/host-agent/internal/config"
 	"github.com/nosana-ci/host-agent/internal/doctor"
 	"github.com/nosana-ci/host-agent/internal/keys"
+	"github.com/nosana-ci/host-agent/internal/local"
 	"github.com/nosana-ci/host-agent/internal/manifest"
 	"github.com/nosana-ci/host-agent/internal/node"
 	"github.com/nosana-ci/host-agent/internal/podman"
@@ -119,9 +120,11 @@ func Run(ctx context.Context, given config.Config, token string, out io.Writer) 
 		return err
 	}
 	say("node address %s", keys.Address(wallet))
+	if err := cliGroup(say); err != nil {
+		say("warning: %v", err)
+	}
 	if token != "" {
 		if err := st.Update(func(s *store.State) { s.ClaimToken = token }); err != nil {
-
 			return err
 		}
 		say("claim token saved; the agent links this host to your account on start")
@@ -207,9 +210,25 @@ func ensurePolicy() error {
 }
 
 // sayTo writes the "• " progress lines of install and uninstall.
-
 func sayTo(out io.Writer) func(format string, args ...any) {
 	return func(format string, args ...any) { fmt.Fprintf(out, "• "+format+"\n", args...) }
+}
+
+// cliGroup lets the user who ran sudo use the CLI without it: the agent's socket belongs to the
+// nosana group.
+func cliGroup(say func(string, ...any)) error {
+	if out, err := exec.Command("groupadd", "-f", local.Group).CombinedOutput(); err != nil {
+		return fmt.Errorf("groupadd %s: %v: %s", local.Group, err, strings.TrimSpace(string(out)))
+	}
+	name := os.Getenv("SUDO_USER")
+	if name == "" || name == "root" {
+		return nil
+	}
+	if out, err := exec.Command("usermod", "-aG", local.Group, name).CombinedOutput(); err != nil {
+		return fmt.Errorf("usermod %s: %v: %s", name, err, strings.TrimSpace(string(out)))
+	}
+	say("%s may use the CLI without sudo after logging in again", name)
+	return nil
 }
 
 func backupWallet() (string, error) {
