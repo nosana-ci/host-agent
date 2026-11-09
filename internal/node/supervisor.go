@@ -5,12 +5,10 @@ package node
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
-	"net/http"
 	"slices"
 	"sync"
 	"time"
@@ -55,7 +53,8 @@ type Supervisor struct {
 	restarted bool // the restart happened but the state could not record it
 	crashes   int
 	nextStart time.Time
-	swapNow   bool // the owner asked for the update: the next image swap does not wait
+	swapNow   bool      // the owner asked for the update: the next image swap does not wait
+	eventsAt  time.Time // the newest node state change reported as an event
 
 	// WaitingForSOL reports that the node wallet is below the SOL the node waits for at start.
 	WaitingForSOL func() bool
@@ -111,7 +110,7 @@ func (s *Supervisor) MayInterrupt() bool {
 		}
 		return time.Since(s.waitingSince()) >= maxWait
 	}
-	return true
+	return true // starting, restarting, or waiting for SOL or its registration: nothing to lose
 }
 
 // waitingSince is when a change first waited for the node, recording now if none did.
@@ -228,7 +227,7 @@ func (s *Supervisor) reconcile(ctx context.Context) error {
 	s.mu.Unlock()
 
 	if _, err := s.pc.Info(ctx); err != nil {
-		s.observe(nil, "")
+		s.observe(ctx, nil, "")
 		return fmt.Errorf("podman unreachable: %w", err)
 	}
 	if err := s.ensureNetwork(ctx); err != nil {
@@ -240,7 +239,7 @@ func (s *Supervisor) reconcile(ctx context.Context) error {
 	} else if err != nil {
 		return err
 	}
-	defer func() { s.observe(ctr, image) }()
+	defer func() { s.observe(ctx, ctr, image) }()
 	if swapNow && ctr != nil && ctr.Config.Labels[LabelImage] == image && ctr.Config.Labels[labelNetwork] == s.network {
 		s.mu.Lock()
 		s.swapNow = false // nothing to swap: a later release waits as usual
@@ -397,8 +396,8 @@ func (s *Supervisor) ensureNetwork(ctx context.Context) error {
 	return fmt.Errorf("no free subnet for %s: %w", networkName, err)
 }
 
-// observe refreshes the status from the container and the node's own API.
-func (s *Supervisor) observe(ctr *podman.Container, image string) {
+// observe refreshes the status from the container, its log and the node's own API.
+func (s *Supervisor) observe(ctx context.Context, ctr *podman.Container, image string) {
 	status := api.NodeStatus{Container: "missing", Image: image}
 	if ctr == nil && image == "" {
 		status.Container = "unknown"
@@ -409,8 +408,17 @@ func (s *Supervisor) observe(ctr *podman.Container, image string) {
 			status.Image = img
 		}
 		if ctr.State.Running {
-			if state := nodeState(); state != "" {
-				status.State = &state
+			if info := readInfo(ctx); info != nil {
+				status.State = &info.State
+				status.Activity = info.Activity()
+				if p := info.Prompt(); p != "" {
+					status.Prompt = &p
+				}
+				var events []Event
+				events, s.eventsAt = info.Events(s.eventsAt)
+				for _, e := range events {
+					s.st.Record("node", e.Level, "", "%s", e.Message)
+				}
 			}
 		}
 	}
@@ -418,24 +426,4 @@ func (s *Supervisor) observe(ctr *podman.Container, image string) {
 	status.Desired, status.Restarts, status.LastError = s.status.Desired, s.status.Restarts, s.status.LastError
 	s.status, s.observed = status, true
 	s.mu.Unlock()
-
-}
-
-var infoClient = &http.Client{Timeout: 3 * time.Second}
-
-// nodeState is the node's own state (QUEUED, RUNNING_JOB, ...) from /node/info, or "" when the
-// API does not answer.
-func nodeState() string {
-	resp, err := infoClient.Get(fmt.Sprintf("http://127.0.0.1:%d/node/info", apiPort))
-	if err != nil {
-		return ""
-	}
-	defer resp.Body.Close()
-	var info struct {
-		State string `json:"state"`
-	}
-	if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&info) != nil {
-		return ""
-	}
-	return info.State
 }

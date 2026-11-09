@@ -18,6 +18,8 @@ type State struct {
 	NodeImage   string  `json:"nodeImage,omitempty"`   // from the release manifest
 	Update      Update  `json:"update"`
 	Events      []Event `json:"events,omitempty"` // not yet taken by host-manager
+	// RebootWanted is since when a reboot-when-idle waits for the node to be interruptible.
+	RebootWanted *time.Time `json:"rebootWanted,omitempty"`
 }
 
 // Update is the self-update bookkeeping: the version that must still prove itself, the ones

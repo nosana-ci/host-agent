@@ -33,6 +33,7 @@ type Artifacts struct {
 
 type Manifest struct {
 	Version string `json:"version"`
+	Notes   string `json:"notes,omitempty"` // what is new in this release, for the owner
 	Agent   struct {
 		Artifacts Artifacts `json:"artifacts"`
 	} `json:"agent"`
