@@ -39,3 +39,41 @@ func TestBase58(t *testing.T) {
 		t.Fatalf("got %s", got)
 	}
 }
+
+func TestImport(t *testing.T) {
+	dir := t.TempDir()
+	src, dst := filepath.Join(dir, "old.json"), filepath.Join(dir, "node", "nosana_key.json")
+	key, err := Wallet(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Import(src, dst)
+	if err != nil || !got.Equal(key) {
+		t.Fatalf("import: %v", err)
+	}
+	if again, err := Wallet(dst); err != nil || !again.Equal(key) {
+		t.Fatalf("the imported wallet reads back as another key: %v", err)
+	}
+	if _, err := Import(src, dst); err != nil {
+		t.Fatalf("importing the same key again: %v", err)
+	}
+
+	other := filepath.Join(dir, "other.json")
+	if _, err := Wallet(other); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Import(other, dst); err == nil {
+		t.Fatal("another key replaced the wallet")
+	}
+
+	var nums []int
+	raw, _ := os.ReadFile(src)
+	_ = json.Unmarshal(raw, &nums)
+	nums[63] ^= 1
+	bad, _ := json.Marshal(nums)
+	broken := filepath.Join(dir, "broken.json")
+	_ = os.WriteFile(broken, bad, 0o600)
+	if _, err := Import(broken, filepath.Join(dir, "fresh.json")); err == nil {
+		t.Fatal("a keypair whose halves do not match was imported")
+	}
+}

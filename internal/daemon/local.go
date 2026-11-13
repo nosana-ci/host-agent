@@ -20,6 +20,7 @@ import (
 	"github.com/nosana-ci/host-agent/internal/node"
 	"github.com/nosana-ci/host-agent/internal/podman"
 	"github.com/nosana-ci/host-agent/internal/service"
+	"github.com/nosana-ci/host-agent/internal/store"
 	"github.com/nosana-ci/host-agent/internal/version"
 )
 
@@ -47,6 +48,19 @@ func (d *daemon) closeLocal() {
 	_ = d.cli.Shutdown(ctx)
 }
 
+// movingStatus is what a handover waits for; set as long as one runs.
+func (d *daemon) movingStatus(s store.State) string {
+	if !s.Handover {
+		return ""
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.moving == "" {
+		return "taking over from the old node"
+	}
+	return d.moving
+}
+
 func (d *daemon) localHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /status", func(w http.ResponseWriter, r *http.Request) {
@@ -54,6 +68,7 @@ func (d *daemon) localHandler() http.Handler {
 		writeJSON(w, local.Status{
 			Agent: version.Version, NodeAddress: d.address, ControlURL: d.cfg.ControlURL, Network: d.cfg.Network,
 			Claimed: s.Claimed, ClaimPending: s.ClaimToken != "", LastRollback: s.Update.LastRollback, Status: d.status(r.Context()),
+			Moving: d.movingStatus(s),
 		})
 	})
 	mux.HandleFunc("POST /commands/{verb}", func(w http.ResponseWriter, r *http.Request) {

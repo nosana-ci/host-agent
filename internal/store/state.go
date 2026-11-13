@@ -20,6 +20,12 @@ type State struct {
 	Events      []Event `json:"events,omitempty"` // not yet taken by host-manager
 	// RebootWanted is since when a reboot-when-idle waits for the node to be interruptible.
 	RebootWanted *time.Time `json:"rebootWanted,omitempty"`
+	// Moved is set by a node import that took over a node running in docker; the agent then keeps
+	// that node stopped.
+	Moved bool `json:"moved,omitempty"`
+	// Handover holds the agent's node (NodeStopped) until the old node is gone; the agent stops it
+	// the moment it is between jobs.
+	Handover bool `json:"handover,omitempty"`
 }
 
 // Update is the self-update bookkeeping: the version that must still prove itself, the ones

@@ -25,6 +25,7 @@ import (
 	"github.com/nosana-ci/host-agent/internal/doctor"
 	"github.com/nosana-ci/host-agent/internal/install"
 	"github.com/nosana-ci/host-agent/internal/keys"
+	"github.com/nosana-ci/host-agent/internal/legacy"
 	"github.com/nosana-ci/host-agent/internal/local"
 	"github.com/nosana-ci/host-agent/internal/node"
 	"github.com/nosana-ci/host-agent/internal/podman"
@@ -36,12 +37,15 @@ import (
 const usage = `nosana-host runs the Nosana node on this machine and reports to host-manager.
 
 Usage:
-  nosana-host install --control-url URL --release-url URL --network mainnet|devnet [--token T]   install or repair (sudo)
+  nosana-host install --control-url URL --release-url URL --network mainnet|devnet [--token T] [--hold]
+                                        install or repair (sudo); --hold leaves the agent stopped until node import gives it its key
   nosana-host uninstall [--purge]       remove the services; --purge also deletes state after backing the wallet up (sudo)
   nosana-host status                    link, wallet, node, GPU, disk, checks and update state
   nosana-host logs [node|agent|podman|job ID] [-f] [-n N]   the node container's log, a journal, or a job's container
   nosana-host doctor [--fix ID|all] [--yes]   run the host checks; --fix applies the fix of one check, or of every check that has one
   nosana-host node start|stop|restart   the node container; a stopped node stays stopped until started
+  nosana-host node import KEY           make KEY the node wallet (sudo); takes over the node that runs in docker with it (start.sh)
+  nosana-host node find                 the nodes that run in docker on this machine: address and key file
   nosana-host update [--check]          install the current release now, also while the node is busy; --check only looks
   nosana-host config [get KEY | set KEY on|off]   the settings (auto-update) and the install's values
   nosana-host register [--show] [--email E] [--discord D] [--twitter T] [--accept-agreement]   the node's contact details; asks on a terminal
@@ -117,9 +121,11 @@ func cmdInstall(args []string) error {
 	fs.StringVar(&cfg.ControlURL, "control-url", "", "host-manager URL")
 	fs.StringVar(&cfg.ReleaseURL, "release-url", "", "where stable.json and stable.json.sig live")
 	fs.StringVar(&cfg.Network, "network", "", "mainnet or devnet")
-	token := fs.String("token", "", "claim token from the console's install command")
+	var opts install.Options
+	fs.StringVar(&opts.Token, "token", "", "claim token from the console's install command")
+	fs.BoolVar(&opts.Hold, "hold", false, "leave the agent stopped, without a node wallet, until node import gives it its key")
 	_ = fs.Parse(args)
-	return install.Run(context.Background(), cfg, *token, os.Stdout)
+	return install.Run(context.Background(), cfg, opts, os.Stdout)
 }
 
 // cmdStatus shows what the console's host page shows, a row per item; a row with an empty label
@@ -147,6 +153,9 @@ func cmdStatus() error {
 		node += ", reports " + *n.State
 	}
 	row("node", node)
+	if s.Moving != "" {
+		row("moving", s.Moving)
+	}
 	if n.Activity != nil {
 		row("", activityLine(*n.Activity))
 	}
@@ -547,12 +556,24 @@ func onOff(b bool) string {
 	return "off"
 }
 
-// cmdNode runs the console's start-node, stop-node or restart-node.
+// cmdNode runs the console's start-node, stop-node or restart-node, imports a node key, or lists
+// the nodes that run in docker.
 func cmdNode(args []string) error {
-	if len(args) != 1 || (args[0] != "start" && args[0] != "stop" && args[0] != "restart") {
-		return errors.New("usage: nosana-host node start|stop|restart")
+	switch {
+	case len(args) == 2 && args[0] == "import":
+		if os.Geteuid() != 0 {
+			return errors.New("run with sudo")
+		}
+		return install.Import(context.Background(), args[1], os.Stdout)
+	case len(args) == 1 && args[0] == "find":
+		for _, n := range legacy.Find(context.Background()) {
+			fmt.Println(n.Address, n.KeyPath)
+		}
+		return nil
+	case len(args) == 1 && (args[0] == "start" || args[0] == "stop" || args[0] == "restart"):
+		return cmdCommand(args[0] + "-node")
 	}
-	return cmdCommand(args[0] + "-node")
+	return errors.New("usage: nosana-host node start|stop|restart|find, or node import KEY")
 }
 
 // agreementURL is the Participation Agreement the node asks a host to accept on its first start.
@@ -673,14 +694,11 @@ func cmdCommand(verb string) error {
 
 // result posts to the agent and prints the message of the command result it answers with.
 func result(path string, body any) error {
-	var r api.CommandResult
-	if err := agent(http.MethodPost, path, body, &r); err != nil {
+	msg, err := local.Command(context.Background(), path, body)
+	if err != nil {
 		return err
 	}
-	if !r.Ok {
-		return errors.New(r.Message)
-	}
-	fmt.Println(r.Message)
+	fmt.Println(msg)
 	return nil
 }
 

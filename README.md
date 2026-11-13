@@ -26,6 +26,19 @@ reads the current release manifest, downloads the agent and checks its sha256, a
    `nosana-podman.service` and `nosana-host.service`, and starts them.
 
 Running the command again repairs the install and keeps the wallet, the keys and the link.
+
+`sudo nosana-host node import KEY` makes a key file the node wallet; another wallet the agent had
+is backed up into the home of the user who ran sudo. A node that runs in docker with that key, from
+`start.sh` or as a `nosana/nosana-node` container, is taken over and keeps its address and market:
+the agent pulls the node image while the old node runs, asks the old node to stop before its next
+job (a `drain` file in its config folder; an older node is stopped the moment it is seen between
+jobs), stops its container (only one whose `/root/.nosana` holds this key) and drops its restart
+policy, and starts its own node once the old one no longer answers at the node's public domain. From then on it
+stops the old node whenever it runs again (the market queue holds one node per key).
+`sudo nosana-host uninstall` and the `start.sh` command undo it. The install script finds such a
+node (`nosana-host node find`) and offers to move it; it then installs with `--hold`, which leaves
+the agent stopped and disabled without a wallet, and imports the key.
+
 Supported: Ubuntu 22.04/24.04/26.04 and Debian 12/13 on x86-64, with the NVIDIA driver (R550 or
 newer), nvidia-container-toolkit and a CDI spec for the GPU; the console's health panel shows
 what is missing.

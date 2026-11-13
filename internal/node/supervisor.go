@@ -100,10 +100,11 @@ func (s *Supervisor) MayInterrupt() bool {
 	if status.State != nil {
 		state = *status.State
 	}
-	switch state {
-	case "RUNNING_JOB", "BENCHMARKING":
+	if Busy(state) {
 		s.waitingSince()
 		return false
+	}
+	switch state {
 	case "", "QUEUED", "JOINING_MARKET":
 		if state == "" && s.WaitingForSOL != nil && s.WaitingForSOL() {
 			return true
@@ -370,6 +371,12 @@ func (s *Supervisor) ensureImage(ctx context.Context, image string) (bool, error
 	}
 	slog.Info("node: pulling image", "image", image)
 	return true, s.pc.Pull(ctx, image)
+}
+
+// Pull fetches the node image unless it is there already, so a node held back starts at once.
+func (s *Supervisor) Pull(ctx context.Context) error {
+	_, err := s.ensureImage(ctx, s.Image())
+	return err
 }
 
 // ensureNetwork creates the node network. The node only looks it up by name, so when the usual

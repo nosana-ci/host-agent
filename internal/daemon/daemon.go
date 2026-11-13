@@ -48,7 +48,8 @@ type daemon struct {
 	mu     sync.Mutex
 	gpu    api.GpuStatus
 	checks []api.Check
-	auto   bool // the autoUpdate setting, as set-config may change it
+	auto   bool   // the autoUpdate setting, as set-config may change it
+	moving string // what a handover from the old node waits for
 }
 
 func Run(ctx context.Context) error {
@@ -78,7 +79,7 @@ func Run(ctx context.Context) error {
 		upd:     updater.New(cfg, st, sup, pc),
 		ctrl:    control.New(cfg.ControlURL, wallet),
 		bal:     bal,
-		reach:   &reach{url: NodeDomain(cfg.Network, keys.Address(wallet)), address: keys.Address(wallet)},
+		reach:   &reach{url: node.Domain(cfg.Network, keys.Address(wallet)), address: keys.Address(wallet)},
 		storage: newStorage(pc),
 		cmds:    make(chan []job, 16),
 		auto:    cfg.AutoUpdateOn(),
@@ -94,7 +95,7 @@ func Run(ctx context.Context) error {
 	}
 
 	var wg sync.WaitGroup
-	for _, run := range []func(context.Context){d.sup.Run, d.upd.Run, d.bal.run, d.reach.run, d.storage.run, d.rebootLoop, d.doctorLoop, d.heartbeatLoop, d.pollLoop, d.commandLoop, d.eventLoop, d.serveLocal} {
+	for _, run := range []func(context.Context){d.sup.Run, d.upd.Run, d.bal.run, d.reach.run, d.storage.run, d.rebootLoop, d.legacyLoop, d.doctorLoop, d.heartbeatLoop, d.pollLoop, d.commandLoop, d.eventLoop, d.serveLocal} {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
