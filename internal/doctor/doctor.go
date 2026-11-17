@@ -62,6 +62,12 @@ func Run(ctx context.Context, cfg config.Config, pc *podman.Client) (api.GpuStat
 	return g, checks
 }
 
+// GPU runs only the GPU checks: the driver, the container toolkit and the CDI spec.
+func GPU(ctx context.Context) []api.Check {
+	g, err := detectGPUs(ctx)
+	return gpuChecks(g, err)
+}
+
 // groups is the console's grouping of the checks; the GPU checks are the rest.
 var groups = map[string]string{
 	"os": "system", "cgroup": "system", "disk": "system", "clock": "system",

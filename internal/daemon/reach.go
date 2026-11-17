@@ -2,30 +2,16 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/nosana-ci/host-agent/internal/api"
+	"github.com/nosana-ci/host-agent/internal/node"
 )
 
 // reachEvery is how often the agent asks the node's public domain for /node/info, the way jobs
 // and the explorer reach the node.
 const reachEvery = 2 * time.Minute
-
-// NodeDomain is the public address the network reaches a node's API at.
-func NodeDomain(network, address string) string {
-	cluster := "prd"
-	if network == "devnet" {
-		cluster = "dev"
-	}
-	return fmt.Sprintf("https://%s.node.k8s.%s.nos.ci", address, cluster)
-}
-
-var reachClient = &http.Client{Timeout: 5 * time.Second}
 
 type reach struct {
 	url, address string
@@ -55,37 +41,13 @@ func (r *reach) status() *api.ReachStatus {
 	return r.last
 }
 
-// probe asks url for /node/info and expects the node's own answer for this address. While the
-// tunnel starts, something else answers with a placeholder page.
+// probe turns node.Public into the heartbeat's reach status.
 func probe(ctx context.Context, url, address string) api.ReachStatus {
-	st := api.ReachStatus{Url: url, CheckedAt: time.Now().UTC()}
-	fail := func(msg string) api.ReachStatus {
-		st.Error = &msg
-		return st
+	st := api.ReachStatus{Url: url, CheckedAt: time.Now().UTC(), Ok: true}
+	if _, err := node.Public(ctx, url, address); err != nil {
+		msg := err.Error()
+		st.Ok, st.Error = false, &msg
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url+"/node/info", nil)
-	if err != nil {
-		return fail(err.Error())
-	}
-	req.Header.Set("Accept", "application/json")
-	resp, err := reachClient.Do(req)
-	if err != nil {
-		return fail(err.Error())
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fail("answered " + resp.Status)
-	}
-	var info struct {
-		Node string `json:"node"`
-	}
-	if !strings.HasPrefix(resp.Header.Get("Content-Type"), "application/json") || json.NewDecoder(resp.Body).Decode(&info) != nil {
-		return fail("answered, but not with the node's API (the tunnel is still starting)")
-	}
-	if info.Node != address {
-		return fail("answers for another node: " + info.Node)
-	}
-	st.Ok = true
 	return st
 }
 

@@ -20,6 +20,7 @@ import (
 	"github.com/nosana-ci/host-agent/internal/config"
 	"github.com/nosana-ci/host-agent/internal/doctor"
 	"github.com/nosana-ci/host-agent/internal/keys"
+	"github.com/nosana-ci/host-agent/internal/legacy"
 	"github.com/nosana-ci/host-agent/internal/local"
 	"github.com/nosana-ci/host-agent/internal/manifest"
 	"github.com/nosana-ci/host-agent/internal/node"
@@ -29,21 +30,20 @@ import (
 	"github.com/nosana-ci/host-agent/internal/version"
 )
 
-// Run installs or repairs the agent. Fields set in given replace the saved config; token links the
-// host to an account.
-func Run(ctx context.Context, given config.Config, token string, out io.Writer) (err error) {
+// Options are install's flags besides the config.
+type Options struct {
+	Token string // links the host to an account
+	// Hold installs without a node wallet and leaves the agent stopped and disabled, for a node
+	// import to start it with its key: the agent would otherwise make a wallet, also at a reboot,
+	// and link that one with Token.
+	Hold bool
+}
+
+// Run installs or repairs the agent. Fields set in given replace the saved config.
+func Run(ctx context.Context, given config.Config, opts Options, out io.Writer) (err error) {
 	say := sayTo(out)
 
-	cfg, err := config.Load()
-	if err == nil {
-		say("found an existing install, repairing it")
-		_ = service.Systemctl("stop", service.AgentUnit) // it would overwrite the state we change
-		defer func() {
-			if err != nil {
-				_ = service.Systemctl("start", service.AgentUnit)
-			}
-		}()
-	}
+	cfg, loadErr := config.Load()
 	if given.ControlURL != "" {
 		cfg.ControlURL = given.ControlURL
 	}
@@ -55,6 +55,15 @@ func Run(ctx context.Context, given config.Config, token string, out io.Writer) 
 	}
 	if cfg.ControlURL == "" || cfg.ReleaseURL == "" || (cfg.Network != "mainnet" && cfg.Network != "devnet") {
 		return errors.New("--control-url, --release-url and --network (mainnet or devnet) are required on a first install")
+	}
+	if loadErr == nil {
+		say("found an existing install, repairing it")
+		_ = service.Systemctl("stop", service.AgentUnit) // it would overwrite the state we change
+		defer func() {
+			if err != nil {
+				_ = service.Systemctl("start", service.AgentUnit)
+			}
+		}()
 	}
 	for _, d := range []string{config.BinDir, config.NodeDir, config.PodmanRoot, config.RuntimeDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
@@ -115,16 +124,18 @@ func Run(ctx context.Context, given config.Config, token string, out io.Writer) 
 	}
 	_ = st.Update(func(s *store.State) { s.NodeImage = m.Node.Image })
 
-	wallet, err := keys.Wallet(config.WalletPath)
-	if err != nil {
-		return err
+	if _, err := os.Stat(config.WalletPath); err == nil || !opts.Hold {
+		wallet, err := keys.Wallet(config.WalletPath)
+		if err != nil {
+			return err
+		}
+		say("node address %s", keys.Address(wallet))
 	}
-	say("node address %s", keys.Address(wallet))
 	if err := cliGroup(say); err != nil {
 		say("warning: %v", err)
 	}
-	if token != "" {
-		if err := st.Update(func(s *store.State) { s.ClaimToken = token }); err != nil {
+	if opts.Token != "" {
+		if err := st.Update(func(s *store.State) { s.ClaimToken = opts.Token }); err != nil {
 			return err
 		}
 		say("claim token saved; the agent links this host to your account on start")
@@ -142,11 +153,18 @@ func Run(ctx context.Context, given config.Config, token string, out io.Writer) 
 	if changed {
 		podmanAction = "restart"
 	}
-	for _, args := range [][]string{{"daemon-reload"}, {"enable", service.PodmanUnit, service.AgentUnit}, {podmanAction, service.PodmanUnit}, {"restart", service.AgentUnit}} {
-
+	steps := [][]string{{"daemon-reload"}, {"enable", service.PodmanUnit}, {podmanAction, service.PodmanUnit}}
+	if !opts.Hold {
+		steps = append(steps, []string{"enable", service.AgentUnit}, []string{"restart", service.AgentUnit})
+	}
+	for _, args := range steps {
 		if err := service.Systemctl(args...); err != nil {
 			return err
 		}
+	}
+	if opts.Hold {
+		say("installed; the agent starts once it has its node key: sudo nosana-host node import KEY")
+		return nil
 	}
 	say("services started")
 	fmt.Fprintln(out, "\nDone. Follow the agent with: journalctl -u nosana-host -f")
@@ -159,15 +177,8 @@ func Uninstall(ctx context.Context, purge bool, out io.Writer) error {
 	say := sayTo(out)
 
 	_ = service.Systemctl("stop", service.AgentUnit)
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
-	defer cancel()
-	pc := podman.New(config.PodmanSocket)
-	if err := pc.StopContainer(ctx, node.ContainerName, 2*time.Minute); err == nil {
-		say("node container stopped")
-	}
-	if err := pc.RemoveContainer(ctx, node.ContainerName); err != nil {
-		say("warning: the node container was not removed (%v); remove it with podman", err)
-	}
+	legacy.Undrain(ctx) // a move under way is undone: the old node keeps running
+	removeNode(ctx, say)
 	_ = service.Systemctl("disable", "--now", service.PodmanUnit, service.AgentUnit)
 	_ = os.Remove(filepath.Join(service.UnitDir, service.AgentUnit))
 	_ = os.Remove(filepath.Join(service.UnitDir, service.PodmanUnit))
@@ -185,6 +196,8 @@ func Uninstall(ctx context.Context, purge bool, out io.Writer) error {
 		say("wallet backed up to %s", backup)
 	}
 	// Podman storage holds files owned by other uids; let podman clean it up.
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
 	reset := exec.CommandContext(ctx, config.RuntimePodman, "--root", config.PodmanRoot, "--runroot", config.PodmanRunRoot, "system", "reset", "--force")
 	reset.Env = append(os.Environ(), runtimeEnv()...)
 	_ = reset.Run()
@@ -193,6 +206,20 @@ func Uninstall(ctx context.Context, purge bool, out io.Writer) error {
 	_ = os.Remove(config.Path)
 	say("state and config deleted")
 	return nil
+}
+
+// removeNode stops the agent's node, giving it time to leave the market queue, and removes its
+// container.
+func removeNode(ctx context.Context, say func(string, ...any)) {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+	pc := podman.New(config.PodmanSocket)
+	if err := pc.StopContainer(ctx, node.ContainerName, 2*time.Minute); err == nil {
+		say("node container stopped")
+	}
+	if err := pc.RemoveContainer(ctx, node.ContainerName); err != nil {
+		say("warning: the node container was not removed (%v); remove it with podman", err)
+	}
 }
 
 // ensurePolicy writes podman's image policy where it looks for it (there is no setting for the

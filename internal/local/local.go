@@ -36,6 +36,7 @@ type Status struct {
 	ClaimPending bool   `json:"claimPending"` // a saved token the agent still has to use
 
 	LastRollback string          `json:"lastRollback,omitempty"`
+	Moving       string          `json:"moving,omitempty"` // what a takeover from the old node waits for
 	Status       api.AgentStatus `json:"status"`
 }
 
@@ -72,6 +73,24 @@ var client = &http.Client{Transport: &http.Transport{
 		return (&net.Dialer{}).DialContext(ctx, "unix", SocketPath)
 	},
 }}
+
+// Command posts to the running agent and returns the message of the command result it answers
+// with; a command that failed is an error with that message.
+func Command(ctx context.Context, path string, body any) (string, error) {
+	answer, err := Call(ctx, http.MethodPost, path, body)
+	if err != nil {
+		return "", err
+	}
+	defer answer.Close()
+	var r api.CommandResult
+	if err := json.NewDecoder(answer).Decode(&r); err != nil {
+		return "", err
+	}
+	if !r.Ok {
+		return "", errors.New(r.Message)
+	}
+	return r.Message, nil
+}
 
 // Call sends a request, with body as JSON when it is not nil, to the running agent over its
 // socket and returns the answer's body, or the agent's error message; the caller closes the body.
