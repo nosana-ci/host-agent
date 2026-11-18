@@ -143,21 +143,74 @@ func (d *daemon) localHandler() http.Handler {
 	mux.HandleFunc("GET /logs/job/{id}", func(w http.ResponseWriter, r *http.Request) {
 		d.logs(w, r, "job", r.PathValue("id"))
 	})
+	// The size of the terminal that watches the node, so its spinners and bars fit that terminal.
+	mux.HandleFunc("POST /node/resize", func(w http.ResponseWriter, r *http.Request) {
+		cols, _ := strconv.Atoi(r.URL.Query().Get("w"))
+		rows, _ := strconv.Atoi(r.URL.Query().Get("h"))
+		if cols < 1 || rows < 1 {
+			http.Error(w, "w and h are the terminal's columns and rows", http.StatusBadRequest)
+			return
+		}
+		if err := d.pc.ResizeTTY(r.Context(), node.ContainerName, cols, rows); err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+		}
+	})
+	mux.HandleFunc("POST /node/attach", d.attach)
 	return mux
 }
 
+// attach joins the CLI to the node's terminal: the request becomes a stream of what the node
+// draws, and what the CLI sends is the node's keyboard.
+func (d *daemon) attach(w http.ResponseWriter, r *http.Request) {
+	ctr, err := d.pc.InspectContainer(r.Context(), node.ContainerName)
+	switch {
+	case errors.Is(err, podman.ErrNotFound), err == nil && !ctr.State.Running:
+		http.Error(w, "the node is not running", http.StatusConflict)
+		return
+	case err != nil:
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	case !ctr.Config.Tty:
+		http.Error(w, "this node container has no terminal yet: it gets one when the node is next idle, or now with nosana-host update", http.StatusConflict)
+		return
+	}
+	term, err := d.pc.Attach(r.Context(), node.ContainerName)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer term.Close()
+	cli, buf, err := http.NewResponseController(w).Hijack()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer cli.Close()
+	_, _ = buf.WriteString("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: tcp\r\n\r\n")
+	_ = buf.Flush()
+	done := make(chan struct{}, 2)
+	go func() { _, _ = io.Copy(term, buf); done <- struct{}{} }()
+	go func() { _, _ = io.Copy(cli, term); done <- struct{}{} }()
+	<-done // either side left; closing both ends the other copy
+}
+
 // logs streams one log: the node container, the agent's or podman's journal, or a job's main
-// container, which the node names "<job id>-0" after the operation index.
+// container, which the node names "<job id>-0" after the operation index. A container's log can
+// start at a time (since, in Unix nanoseconds) instead of a number of lines back.
 func (d *daemon) logs(w http.ResponseWriter, r *http.Request, what, jobID string) {
 	tail, _ := strconv.Atoi(r.URL.Query().Get("tail")) // 0 or missing: everything
 	follow := r.URL.Query().Get("follow") == "true"
+	var since time.Time
+	if ns, err := strconv.ParseInt(r.URL.Query().Get("since"), 10, 64); err == nil {
+		since = time.Unix(0, ns)
+	}
 	out := flushWriter{w}
 	var err error
 	switch what {
 	case "node":
-		err = d.pc.Logs(r.Context(), node.ContainerName, tail, follow, out)
+		err = d.pc.Logs(r.Context(), node.ContainerName, tail, since, follow, out)
 	case "job":
-		err = d.pc.Logs(r.Context(), jobID+"-0", tail, follow, out)
+		err = d.pc.Logs(r.Context(), jobID+"-0", tail, since, follow, out)
 	case "agent":
 		err = service.Journal(r.Context(), service.AgentUnit, tail, follow, out)
 	case "podman":

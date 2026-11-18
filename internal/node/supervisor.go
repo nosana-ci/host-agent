@@ -27,11 +27,20 @@ const (
 	apiPort       = 15001 // the node's port 5001, published on localhost
 	LabelImage    = "io.nosana.host.image"
 	labelNetwork  = "io.nosana.host.network"
-	logSizeMax    = 10 << 20
-	tick          = 5 * time.Second
-	stopTimeout   = 2 * time.Minute
-	maxBackoff    = 5 * time.Minute
-	stableAfter   = 2 * time.Minute // running this long forgets earlier crashes
+	labelSpec     = "io.nosana.host.spec"
+	// specVersion changes with the container's definition; a container made with another one is
+	// recreated once the node is idle. 2: a terminal, so the node draws its spinners and bars and
+	// reads keys (logs node -f, attach).
+	specVersion = "2"
+	// The terminal's size until a CLI that watches it sends its own.
+	termCols, termRows = 120, 40
+	// With a terminal every frame of a spinner is in the log, some 3 to 4 kB a second, and podman
+	// starts the file over when it is full: this holds half a day to a day of it.
+	logSizeMax  = 200 << 20
+	tick        = 5 * time.Second
+	stopTimeout = 2 * time.Minute
+	maxBackoff  = 5 * time.Minute
+	stableAfter = 2 * time.Minute // running this long forgets earlier crashes
 	// maxWait is how long a change that stops the node waits for a node in the queue (or one
 	// whose API does not answer); jobs and benchmarks are always waited for.
 	maxWait = 24 * time.Hour
@@ -241,7 +250,7 @@ func (s *Supervisor) reconcile(ctx context.Context) error {
 		return err
 	}
 	defer func() { s.observe(ctx, ctr, image) }()
-	if swapNow && ctr != nil && ctr.Config.Labels[LabelImage] == image && ctr.Config.Labels[labelNetwork] == s.network {
+	if swapNow && ctr != nil && s.current(ctr, image) {
 		s.mu.Lock()
 		s.swapNow = false // nothing to swap: a later release waits as usual
 		s.mu.Unlock()
@@ -272,9 +281,9 @@ func (s *Supervisor) reconcile(ctx context.Context) error {
 			return err
 		}
 		s.restartDone() // only once it happened; podman may have been away
-		return s.pc.StartContainer(ctx, ContainerName)
+		return s.startContainer(ctx, ctr.Config.Tty)
 
-	case image != "" && (ctr.Config.Labels[LabelImage] != image || ctr.Config.Labels[labelNetwork] != s.network) && (swapNow || s.MayInterrupt()):
+	case image != "" && !s.current(ctr, image) && (swapNow || s.MayInterrupt()):
 		pulled, err := s.ensureImage(ctx, image) // the node keeps running during the pull
 		if err != nil || pulled {
 			return err // the swap waits for the next tick, which asks again whether the node is idle
@@ -299,18 +308,39 @@ func (s *Supervisor) reconcile(ctx context.Context) error {
 		s.mu.Unlock()
 		return nil
 	}
-	return s.restartExited(ctx, ctr.State.ExitCode)
+	return s.restartExited(ctx, ctr)
+}
+
+// current reports whether ctr is the container the agent would create now.
+func (s *Supervisor) current(ctr *podman.Container, image string) bool {
+	l := ctr.Config.Labels
+	return l[LabelImage] == image && l[labelNetwork] == s.network && l[labelSpec] == specVersion
+}
+
+// startContainer starts the node. Its terminal gets a size before its process runs: on a
+// terminal without one the node's spinners flood the log with cursor moves.
+func (s *Supervisor) startContainer(ctx context.Context, tty bool) error {
+	if tty {
+		if err := s.pc.InitContainer(ctx, ContainerName); err != nil {
+			return fmt.Errorf("init node container: %w", err)
+		}
+		if err := s.pc.ResizeTTY(ctx, ContainerName, termCols, termRows); err != nil {
+			return fmt.Errorf("size the node's terminal: %w", err)
+		}
+	}
+	return s.pc.StartContainer(ctx, ContainerName)
 }
 
 // restartExited starts an exited node again: at once when it asked for it or the owner started
 // it, otherwise with a backoff that doubles per crash.
-func (s *Supervisor) restartExited(ctx context.Context, code int) error {
+func (s *Supervisor) restartExited(ctx context.Context, ctr *podman.Container) error {
+	code := ctr.State.ExitCode
 	s.mu.Lock()
 	if s.start || code == exitRespawn {
 		s.start = false
 		s.mu.Unlock()
 		slog.Info("node: starting", "exitCode", code)
-		return s.pc.StartContainer(ctx, ContainerName)
+		return s.startContainer(ctx, ctr.Config.Tty)
 	}
 	if s.nextStart.IsZero() {
 		s.crashes++
@@ -332,7 +362,7 @@ func (s *Supervisor) restartExited(ctx context.Context, code int) error {
 	if !due {
 		return nil
 	}
-	return s.pc.StartContainer(ctx, ContainerName)
+	return s.startContainer(ctx, ctr.Config.Tty)
 }
 
 func (s *Supervisor) create(ctx context.Context, image string) error {
@@ -347,7 +377,7 @@ func (s *Supervisor) create(ctx context.Context, image string) error {
 		Image:   image,
 		Command: []string{"start", "--network", s.network},
 		Env:     map[string]string{"NOSANA_HOST_VERSION": version.Version},
-		Labels:  map[string]string{LabelImage: image, labelNetwork: s.network},
+		Labels:  map[string]string{LabelImage: image, labelNetwork: s.network, labelSpec: specVersion},
 		Mounts: []podman.Mount{
 			{Source: config.NodeDir, Destination: "/root/.nosana"},
 			{Source: config.PodmanSocketDir, Destination: "/root/.nosana/podman"},
@@ -355,12 +385,13 @@ func (s *Supervisor) create(ctx context.Context, image string) error {
 		Network:    networkName,
 		Ports:      []podman.Port{{HostIP: "127.0.0.1", HostPort: apiPort, ContainerPort: 5001, Protocol: "tcp"}},
 		LogSizeMax: logSizeMax,
+		Terminal:   true,
 	}
 	if err := s.pc.CreateContainer(ctx, spec); err != nil {
 		return fmt.Errorf("create node container: %w", err)
 	}
 	slog.Info("node: created and starting", "image", image)
-	return s.pc.StartContainer(ctx, ContainerName)
+	return s.startContainer(ctx, true)
 }
 
 // ensureImage pulls image when it is not here yet and reports whether it did.

@@ -27,8 +27,6 @@ import (
 	"github.com/nosana-ci/host-agent/internal/keys"
 	"github.com/nosana-ci/host-agent/internal/legacy"
 	"github.com/nosana-ci/host-agent/internal/local"
-	"github.com/nosana-ci/host-agent/internal/node"
-	"github.com/nosana-ci/host-agent/internal/podman"
 	"github.com/nosana-ci/host-agent/internal/service"
 	"github.com/nosana-ci/host-agent/internal/store"
 	"github.com/nosana-ci/host-agent/internal/version"
@@ -41,7 +39,9 @@ Usage:
                                         install or repair (sudo); --hold leaves the agent stopped until node import gives it its key
   nosana-host uninstall [--purge]       remove the services; --purge also deletes state after backing the wallet up (sudo)
   nosana-host status                    link, wallet, node, GPU, disk, checks and update state
-  nosana-host logs [node|agent|podman|job ID] [-f] [-n N]   the node container's log, a journal, or a job's container
+  nosana-host logs [node|agent|podman|job ID] [-f] [-n N]   the node container's log, a journal, or a job's container;
+                                        logs node -f on a terminal shows the node's spinners and bars as it draws them
+  nosana-host attach                    the node's terminal, with its keys (s: shut down after the job); Ctrl+C leaves, the node keeps running
   nosana-host doctor [--fix ID|all] [--yes]   run the host checks; --fix applies the fix of one check, or of every check that has one
   nosana-host node start|stop|restart   the node container; a stopped node stays stopped until started
   nosana-host node import KEY           make KEY the node wallet (sudo); takes over the node that runs in docker with it (start.sh)
@@ -79,6 +79,8 @@ func main() {
 		err = cmdStatus()
 	case "logs":
 		err = cmdLogs(os.Args[2:])
+	case "attach":
+		err = cmdAttach()
 	case "doctor":
 		err = cmdDoctor(os.Args[2:])
 	case "node":
@@ -399,7 +401,7 @@ func linked(claimed, pending bool) string {
 }
 
 // cmdLogs streams a log through the agent. While the agent is down, a journal is read directly,
-// and a container's log from podman's socket, which is root's.
+// and the node's log from podman's socket, which is root's (see nodeLog).
 func cmdLogs(args []string) error {
 	fs := flag.NewFlagSet("logs", flag.ExitOnError)
 	follow := fs.Bool("f", false, "keep following")
@@ -418,17 +420,18 @@ func cmdLogs(args []string) error {
 	_ = fs.Parse(args)
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	if what == "node" {
+		if err := nodeLog(ctx, *tail, *follow); err != nil && ctx.Err() == nil {
+			return err
+		}
+		return nil
+	}
 	body, err := local.Call(ctx, http.MethodGet, fmt.Sprintf("%s?tail=%d&follow=%t", path, *tail, *follow), nil)
 	switch {
 	case errors.Is(err, local.ErrNotRunning) && what == "agent": // the journal says why it is down
 		err = service.Journal(ctx, service.AgentUnit, *tail, *follow, os.Stdout)
 	case errors.Is(err, local.ErrNotRunning) && what == "podman":
 		err = service.Journal(ctx, service.PodmanUnit, *tail, *follow, os.Stdout)
-	case errors.Is(err, local.ErrNotRunning) && what == "node":
-		err = podman.New(config.PodmanSocket).Logs(ctx, node.ContainerName, *tail, *follow, os.Stdout)
-		if errors.Is(err, os.ErrPermission) {
-			err = errors.New("the agent is not running; podman's socket is root's: sudo nosana-host logs node")
-		}
 	case err != nil:
 		return err
 	default:

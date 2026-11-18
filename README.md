@@ -46,6 +46,7 @@ what is missing.
 ```sh
 nosana-host status                 # what the console's host page shows: network, link, wallet (SOL and NOS), node, GPU, disk, checks, update
 nosana-host logs [node|agent|podman|job ID] -f   # the node container's log, a journal, or a job's container
+nosana-host attach                 # the node's terminal with its keys (s: shut down after the job); Ctrl+C leaves, the node keeps running
 nosana-host doctor [--fix ID|all] [--yes]   # the host checks; --fix applies the fix of one check, or every fix there is
 nosana-host node start|stop|restart   # the node container, like the console's buttons
 nosana-host update [--check]       # install the current release now; --check only looks
@@ -72,6 +73,17 @@ Install script: `host-console/static/install.sh`.
   socket next to it, port 5001 on `127.0.0.1:15001` for `/node/info`), restarts it when it asks
   (exit 129) or with a backoff when it crashes, keeps it stopped when the owner said so, and swaps
   the image when the release changes it and the node may be interrupted (see Updates).
+- **The node's terminal.** The container has a terminal, as under start.sh, so the node draws its
+  spinners and progress bars and reads keys. The agent sizes the terminal (120x40) before the
+  node's process starts, since on a terminal without a size the spinners flood the log with cursor
+  moves, and a CLI that watches sends its own size. The container's log is therefore everything
+  the node drew, every spinner frame included: some 3 to 4 kB a second, capped at 200 MB (half a
+  day to a day), after which podman starts the file over. `logs node` writes that log as the lines
+  the node left; `logs node -f` on a terminal then shows what the node draws as it draws it.
+  `attach` joins the terminal with the keyboard too (`s` while a job runs: shut down after it;
+  the node's own questions); Ctrl+C leaves and is not passed on, as it would stop the node. A
+  container from before this has no terminal: it is recreated once the node may be interrupted,
+  or at once by `update`.
 - **Heartbeat.** Every 15 s: agent version, the commands it accepts and its settings, update state,
   node state, GPU, disk, the host checks, the runtime, the network and the node wallet's SOL and NOS
   balances (read every minute from the Nosana kit's default RPC: Nosana's Ironforge endpoint on
