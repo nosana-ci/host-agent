@@ -15,8 +15,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/nosana-ci/host-agent/internal/upgrade"
 )
 
 const apiPrefix = "/v5.0.0/libpod"
@@ -27,8 +25,7 @@ var (
 )
 
 type Client struct {
-	http   *http.Client
-	socket string
+	http *http.Client
 }
 
 func New(socket string) *Client {
@@ -38,7 +35,7 @@ func New(socket string) *Client {
 		},
 		ResponseHeaderTimeout: 5 * time.Minute, // a stop may take the node's whole drain timeout
 	}
-	return &Client{http: &http.Client{Transport: tr}, socket: socket}
+	return &Client{http: &http.Client{Transport: tr}}
 }
 
 type Info struct {
@@ -147,7 +144,7 @@ type Spec struct {
 	Network    string
 	Ports      []Port
 	LogSizeMax int64
-	// Terminal gives the container a terminal and keeps its stdin open, for Attach.
+	// Terminal gives the container a terminal and keeps its stdin open, for podman attach.
 	Terminal bool
 }
 
@@ -180,21 +177,6 @@ func (c *Client) InitContainer(ctx context.Context, name string) error {
 func (c *Client) ResizeTTY(ctx context.Context, name string, cols, rows int) error {
 	q := url.Values{"w": {strconv.Itoa(cols)}, "h": {strconv.Itoa(rows)}}
 	return c.call(ctx, http.MethodPost, "/containers/"+url.PathEscape(name)+"/resize", q, nil, nil)
-}
-
-// Attach joins the running container's terminal: reads are what it draws from now on, writes are
-// its keyboard. Podman's own detach keys are off, so every key reaches the container.
-func (c *Client) Attach(ctx context.Context, name string) (net.Conn, error) {
-	q := url.Values{"stream": {"true"}, "stdin": {"true"}, "stdout": {"true"}, "stderr": {"true"}, "detachKeys": {""}}
-	conn, err := upgrade.Dial(ctx, c.socket, apiPrefix+"/containers/"+url.PathEscape(name)+"/attach?"+q.Encode())
-	var status *upgrade.StatusError
-	if !errors.As(err, &status) {
-		return conn, err
-	}
-	if status.Code == http.StatusNotFound {
-		return nil, ErrNotFound
-	}
-	return nil, apiMessage(status.Code, []byte(status.Body))
 }
 
 func (c *Client) StartContainer(ctx context.Context, name string) error {
@@ -301,15 +283,11 @@ func (c *Client) call(ctx context.Context, method, path string, query url.Values
 
 func apiError(resp *http.Response) error {
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	return apiMessage(resp.StatusCode, raw)
-}
-
-func apiMessage(code int, raw []byte) error {
 	var e struct {
 		Message string `json:"message"`
 	}
 	if json.Unmarshal(raw, &e) == nil && e.Message != "" {
-		return fmt.Errorf("podman: %s (HTTP %d)", e.Message, code)
+		return fmt.Errorf("podman: %s (HTTP %d)", e.Message, resp.StatusCode)
 	}
-	return fmt.Errorf("podman: HTTP %d: %s", code, strings.TrimSpace(string(raw)))
+	return fmt.Errorf("podman: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
 }

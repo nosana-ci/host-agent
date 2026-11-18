@@ -20,7 +20,6 @@ import (
 
 	"github.com/nosana-ci/host-agent/internal/api"
 	"github.com/nosana-ci/host-agent/internal/config"
-	"github.com/nosana-ci/host-agent/internal/upgrade"
 )
 
 const Group = "nosana"
@@ -122,16 +121,6 @@ func Call(ctx context.Context, method, path string, body any) (io.ReadCloser, er
 		return nil, errors.New(strings.TrimSpace(string(msg)))
 	}
 	return resp.Body, nil
-}
-
-// Attach opens path on the running agent as a raw two-way stream.
-func Attach(ctx context.Context, path string) (net.Conn, error) {
-	conn, err := upgrade.Dial(ctx, SocketPath, path)
-	var status *upgrade.StatusError
-	if err != nil && !errors.As(err, &status) {
-		return nil, explain(err)
-	}
-	return conn, err
 }
 
 // explain turns a connection error into what the user should do.

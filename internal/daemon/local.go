@@ -155,7 +155,6 @@ func (d *daemon) localHandler() http.Handler {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 		}
 	})
-	mux.HandleFunc("POST /node/attach", d.attach)
 	// What node attach waits for before the node runs.
 	mux.HandleFunc("GET /node/start", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, d.nodeStartNow(r.Context()))
@@ -198,42 +197,6 @@ func nodeStart(n api.NodeStatus, moving string, pulling bool) local.NodeStart {
 		return local.NodeStart{Waiting: *n.LastError}
 	}
 	return local.NodeStart{Waiting: "the node container starts"}
-}
-
-// attach joins the CLI to the node's terminal: the request becomes a stream of what the node
-// draws, and what the CLI sends is the node's keyboard. A node that does not run is a conflict
-// (409), which the CLI waits out when the node is on its way.
-func (d *daemon) attach(w http.ResponseWriter, r *http.Request) {
-	ctr, err := d.pc.InspectContainer(r.Context(), node.ContainerName)
-	switch {
-	case errors.Is(err, podman.ErrNotFound), err == nil && !ctr.State.Running:
-		http.Error(w, "the node is not running", http.StatusConflict)
-		return
-	case err != nil:
-		http.Error(w, err.Error(), http.StatusBadGateway)
-		return
-	case !ctr.Config.Tty:
-		http.Error(w, "this node container has no terminal yet: it gets one when the node is next idle, or now with nosana-host update", http.StatusUnprocessableEntity)
-		return
-	}
-	term, err := d.pc.Attach(r.Context(), node.ContainerName)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
-		return
-	}
-	defer term.Close()
-	cli, buf, err := http.NewResponseController(w).Hijack()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer cli.Close()
-	_, _ = buf.WriteString("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: tcp\r\n\r\n")
-	_ = buf.Flush()
-	done := make(chan struct{}, 2)
-	go func() { _, _ = io.Copy(term, buf); done <- struct{}{} }()
-	go func() { _, _ = io.Copy(cli, term); done <- struct{}{} }()
-	<-done // either side left; closing both ends the other copy
 }
 
 // logs streams one log: the node container, the agent's or podman's journal, or a job's main

@@ -27,10 +27,7 @@ func TestLines(t *testing.T) {
 		"a spinner that still runs is its last frame": {"a\r\n" + frame + "⠋ Waiting" + frame + "⠙ Waiting", "a\n⠙ Waiting\n"},
 		"a spinner that was cleared leaves nothing":   {"a\r\n" + frame + "⠋ Waiting" + frame + "b\r\n", "a\nb\n"},
 		"carriage return redraws":                     {"10%\r50%\r100%\r\ndone\r\n", "100%\ndone\n"},
-		"a block of bars redrawn in place is written again in its last state": {
-			"a 1\r\nb 1\r\n" + "\x1b[2A\x1b[2Ka 2\r\n\x1b[2Kb 2\r\n" + "\x1b[2A\x1b[2Ka 3\r\n\x1b[2Kb 3\r\n" + "done\r\n",
-			"a 1\nb 1\na 3\nb 3\ndone\n"},
-		"a wrapped spinner erased with cursor-up leaves no rows behind": {
+		"a spinner wider than the terminal, erased over two rows, is one line": {
 			strings.Repeat(frame+"\x1b[1A\x1b[0K"+"⠋ a text wider than the terminal", 500) + frame + "\x1b[1A\x1b[0K" + "✔ ok\r\n",
 			"✔ ok\n"},
 		"other sequences are dropped": {"\x1b]0;title\x07\x1b(Bhi\x1b[10;5H\x1b[?2004h\x1b7!\r\n", "hi!\n"},

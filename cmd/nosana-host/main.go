@@ -45,7 +45,8 @@ Usage:
                                         logs node -f on a terminal shows the node's spinners and bars as it draws them
   nosana-host doctor [--fix ID|all] [--yes]   run the host checks; --fix applies the fix of one check, or of every check that has one
   nosana-host node start|stop|restart   the node container; a stopped node stays stopped until started
-  nosana-host node attach               the node's terminal, with its keys (s: shut down after the job), once the node runs; Ctrl+C leaves, the node keeps running
+  nosana-host node attach               the node's terminal, with its keys (s: shut down after the job), once the node runs (sudo);
+                                        Ctrl+C leaves, the node keeps running
   nosana-host node import KEY           make KEY the node wallet (sudo); takes over the node that runs in docker with it (start.sh)
   nosana-host node find                 the nodes that run in docker on this machine: address and key file
   nosana-host update [--check]          install the current release now, also while the node is busy; --check only looks

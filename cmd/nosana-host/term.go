@@ -6,10 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 	"unsafe"
@@ -19,78 +20,55 @@ import (
 	"github.com/nosana-ci/host-agent/internal/node"
 	"github.com/nosana-ci/host-agent/internal/podman"
 	"github.com/nosana-ci/host-agent/internal/termlines"
-	"github.com/nosana-ci/host-agent/internal/upgrade"
 )
 
 // screenReset ends what the node drew on this terminal: its colors, and the cursor its spinners
 // hide.
 const screenReset = "\x1b[0m\x1b[?25h"
 
-const ctrlC = 0x03
-
-// nodeAttach joins this terminal to the node's: it shows what the node draws, and the keys typed
-// here are the node's (s while a job runs: shut down after it). Ctrl+C leaves, and is not
-// passed on: on the node's own terminal it would stop the node. A node that is on its way is
-// waited for (see waitForNode), so the install can end here.
+// nodeAttach joins this terminal to the node's with podman's own attach: it shows what the node
+// draws, and the keys typed here are the node's (s while a job runs: shut down after it). Ctrl+C
+// is the key that leaves, and is not passed on: on the node's own terminal it would stop the
+// node. A node that is on its way is waited for (see waitForNode), so the install can end here.
+// Podman's socket is root's, hence sudo.
 func nodeAttach() error {
+	if os.Geteuid() != 0 {
+		return errors.New("run with sudo")
+	}
 	if !isTerminal(os.Stdin) || !isTerminal(os.Stdout) {
 		return errors.New("node attach needs a terminal; nosana-host logs node -f follows the log without one")
 	}
-	ctx := context.Background()
-	conn, err := attachWhenRunning(ctx, os.Stdout)
-	if err != nil {
+	if err := waitForNode(os.Stdout); err != nil {
 		return err
 	}
-	defer conn.Close()
-	defer followSize(ctx)()
 	// The node only draws what changes from now on: its last lines first, for what it shows.
 	lines := termlines.NewWriter(os.Stdout, true)
 	lines.Open = true
-	_ = readNodeLog(ctx, 20, time.Time{}, false, lines)
+	_ = readNodeLog(context.Background(), 20, time.Time{}, false, lines)
 	_ = lines.Close()
-	restore, err := rawMode(os.Stdin)
-	if err != nil {
-		return err
-	}
-	done := make(chan string, 2)
-	go func() {
-		_, _ = io.Copy(os.Stdout, conn)
-		done <- "the node's terminal closed: the node or the agent stopped"
-	}()
-	go func() {
-		buf := make([]byte, 256)
-		for {
-			n, err := os.Stdin.Read(buf)
-			if i := bytes.IndexByte(buf[:n], ctrlC); i >= 0 || err != nil {
-				_, _ = conn.Write(buf[:max(i, 0)])
-				done <- "detached; the node keeps running"
-				return
-			}
-			if _, err := conn.Write(buf[:n]); err != nil {
-				return // the other copy says why
-			}
-		}
-	}()
-	msg := <-done
-	restore()
-	fmt.Println(screenReset + "\n" + msg)
-	return nil
+	attach := exec.Command(config.RuntimePodman, "--remote", "--url", "unix://"+config.PodmanSocket,
+		"attach", "--detach-keys", "ctrl-c", "--sig-proxy=false", node.ContainerName)
+	var said bytes.Buffer // podman's own messages; what the node writes comes over its terminal
+	attach.Stdin, attach.Stdout, attach.Stderr = os.Stdin, os.Stdout, &said
+	err := attach.Run()
+	fmt.Println(screenReset)
+	return attachEnd(err, said.String(), os.Stdout)
 }
 
-// attachWhenRunning opens the node's terminal once the node runs. A node that stopped between
-// the agent's answer and the attach is waited for again.
-func attachWhenRunning(ctx context.Context, out io.Writer) (net.Conn, error) {
-	for {
-		if err := waitForNode(out); err != nil {
-			return nil, err
-		}
-		conn, err := local.Attach(ctx, "/node/attach")
-		var status *upgrade.StatusError
-		if !errors.As(err, &status) || status.Code != http.StatusConflict {
-			return conn, err
-		}
-		time.Sleep(waitEvery)
+// attachEnd says how podman's attach ended: left with the detach key, which podman reports as
+// an error, or because the node stopped; anything else podman said is the error.
+func attachEnd(err error, said string, out io.Writer) error {
+	switch said = strings.TrimSpace(said); {
+	case strings.Contains(said, "detached from container"):
+		fmt.Fprintln(out, "detached; the node keeps running")
+	case err != nil && said != "":
+		return errors.New("podman attach: " + strings.TrimPrefix(said, "Error: "))
+	case err != nil:
+		return fmt.Errorf("podman attach: %w", err)
+	default:
+		fmt.Fprintln(out, "the node's terminal closed: the node stopped")
 	}
+	return nil
 }
 
 // agentGrace is how long waitForNode waits for an agent that does not answer: an install has
@@ -153,25 +131,6 @@ func termSize(f *os.File) (cols, rows int, ok bool) {
 	var ws struct{ Row, Col, X, Y uint16 }
 	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), syscall.TIOCGWINSZ, uintptr(unsafe.Pointer(&ws)))
 	return int(ws.Col), int(ws.Row), errno == 0 && ws.Col > 0 && ws.Row > 0
-}
-
-// rawMode hands every key to the reader as it is typed, unechoed and uninterpreted, until
-// restore is called.
-func rawMode(f *os.File) (restore func(), err error) {
-	var old syscall.Termios
-	if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), syscall.TCGETS, uintptr(unsafe.Pointer(&old))); errno != 0 {
-		return nil, errno
-	}
-	raw := old
-	raw.Iflag &^= syscall.IGNBRK | syscall.BRKINT | syscall.PARMRK | syscall.ISTRIP | syscall.INLCR | syscall.IGNCR | syscall.ICRNL | syscall.IXON
-	raw.Lflag &^= syscall.ECHO | syscall.ECHONL | syscall.ICANON | syscall.ISIG | syscall.IEXTEN
-	raw.Cc[syscall.VMIN], raw.Cc[syscall.VTIME] = 1, 0
-	if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), syscall.TCSETS, uintptr(unsafe.Pointer(&raw))); errno != 0 {
-		return nil, errno
-	}
-	return func() {
-		_, _, _ = syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), syscall.TCSETS, uintptr(unsafe.Pointer(&old)))
-	}, nil
 }
 
 // nodeLog writes the node container's log, which is what the node drew on its terminal: every

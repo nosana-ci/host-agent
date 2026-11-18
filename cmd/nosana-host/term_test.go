@@ -2,10 +2,8 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net"
 	"net/http"
 	"path/filepath"
@@ -17,24 +15,13 @@ import (
 )
 
 // fakeAgent answers GET /node/start with the given answers in turn, the last one from then on.
-// Its attach finds the node not running the first time, as when the node stopped in between.
 func fakeAgent(t *testing.T, answers ...local.NodeStart) {
 	t.Helper()
-	asked, attached := 0, 0
+	asked := 0
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /node/start", func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(answers[min(asked, len(answers)-1)])
 		asked++
-	})
-	mux.HandleFunc("POST /node/attach", func(w http.ResponseWriter, _ *http.Request) {
-		if attached++; attached == 1 {
-			http.Error(w, "the node is not running", http.StatusConflict)
-			return
-		}
-		conn, buf, _ := http.NewResponseController(w).Hijack()
-		defer conn.Close()
-		_, _ = buf.WriteString("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: tcp\r\n\r\nframe")
-		_ = buf.Flush()
 	})
 	old, every := local.SocketPath, waitEvery
 	local.SocketPath, waitEvery = filepath.Join(t.TempDir(), "cli.sock"), time.Millisecond
@@ -92,16 +79,22 @@ func TestWaitForNodeGivesAStartingAgentTime(t *testing.T) {
 	}
 }
 
-// The agent's answer and the attach are two requests: a node that stopped in between (it was
-// just stopped, or it restarts) is waited for again instead of an error.
-func TestAttachWaitsAgainWhenTheNodeStoppedInBetween(t *testing.T) {
-	fakeAgent(t, local.NodeStart{Running: true})
-	conn, err := attachWhenRunning(context.Background(), &bytes.Buffer{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close()
-	if got, _ := io.ReadAll(conn); string(got) != "frame" {
-		t.Fatalf("got %q", got)
+// Podman reports leaving with the detach key as an error, and a node that stopped as none.
+func TestAttachEnd(t *testing.T) {
+	failed := errors.New("exit status 125")
+	for name, c := range map[string]struct {
+		err              error
+		said, out, error string
+	}{
+		"left with Ctrl+C":        {failed, "Error: detached from container\n", "detached; the node keeps running\n", ""},
+		"the node stopped":        {nil, "", "the node's terminal closed: the node stopped\n", ""},
+		"podman's own error":      {failed, "Error: you can only attach to running containers\n", "", "podman attach: you can only attach to running containers"},
+		"podman could not be run": {failed, "", "", "podman attach: exit status 125"},
+	} {
+		var out bytes.Buffer
+		err := attachEnd(c.err, c.said, &out)
+		if out.String() != c.out || (err == nil) != (c.error == "") || err != nil && err.Error() != c.error {
+			t.Errorf("%s: got %q, %v", name, out.String(), err)
+		}
 	}
 }
