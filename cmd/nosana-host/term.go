@@ -26,12 +26,12 @@ const screenReset = "\x1b[0m\x1b[?25h"
 
 const ctrlC = 0x03
 
-// cmdAttach joins this terminal to the node's: it shows what the node draws, and the keys typed
+// nodeAttach joins this terminal to the node's: it shows what the node draws, and the keys typed
 // here are the node's (s while a job runs: shut down after it). Ctrl+C leaves, and is not
 // passed on: on the node's own terminal it would stop the node.
-func cmdAttach() error {
+func nodeAttach() error {
 	if !isTerminal(os.Stdin) || !isTerminal(os.Stdout) {
-		return errors.New("attach needs a terminal; nosana-host logs node -f follows the log without one")
+		return errors.New("node attach needs a terminal; nosana-host logs node -f follows the log without one")
 	}
 	ctx := context.Background()
 	conn, err := local.Attach(ctx, "/node/attach")

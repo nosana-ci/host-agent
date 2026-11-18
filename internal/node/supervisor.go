@@ -30,7 +30,7 @@ const (
 	labelSpec     = "io.nosana.host.spec"
 	// specVersion changes with the container's definition; a container made with another one is
 	// recreated once the node is idle. 2: a terminal, so the node draws its spinners and bars and
-	// reads keys (logs node -f, attach).
+	// reads keys (logs node -f, node attach).
 	specVersion = "2"
 	// The terminal's size until a CLI that watches it sends its own.
 	termCols, termRows = 120, 40

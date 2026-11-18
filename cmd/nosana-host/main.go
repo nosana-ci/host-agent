@@ -41,9 +41,9 @@ Usage:
   nosana-host status                    link, wallet, node, GPU, disk, checks and update state
   nosana-host logs [node|agent|podman|job ID] [-f] [-n N]   the node container's log, a journal, or a job's container;
                                         logs node -f on a terminal shows the node's spinners and bars as it draws them
-  nosana-host attach                    the node's terminal, with its keys (s: shut down after the job); Ctrl+C leaves, the node keeps running
   nosana-host doctor [--fix ID|all] [--yes]   run the host checks; --fix applies the fix of one check, or of every check that has one
   nosana-host node start|stop|restart   the node container; a stopped node stays stopped until started
+  nosana-host node attach               the node's terminal, with its keys (s: shut down after the job); Ctrl+C leaves, the node keeps running
   nosana-host node import KEY           make KEY the node wallet (sudo); takes over the node that runs in docker with it (start.sh)
   nosana-host node find                 the nodes that run in docker on this machine: address and key file
   nosana-host update [--check]          install the current release now, also while the node is busy; --check only looks
@@ -79,8 +79,6 @@ func main() {
 		err = cmdStatus()
 	case "logs":
 		err = cmdLogs(os.Args[2:])
-	case "attach":
-		err = cmdAttach()
 	case "doctor":
 		err = cmdDoctor(os.Args[2:])
 	case "node":
@@ -559,8 +557,8 @@ func onOff(b bool) string {
 	return "off"
 }
 
-// cmdNode runs the console's start-node, stop-node or restart-node, imports a node key, or lists
-// the nodes that run in docker.
+// cmdNode runs the console's start-node, stop-node or restart-node, joins the node's terminal,
+// imports a node key, or lists the nodes that run in docker.
 func cmdNode(args []string) error {
 	switch {
 	case len(args) == 2 && args[0] == "import":
@@ -575,8 +573,10 @@ func cmdNode(args []string) error {
 		return nil
 	case len(args) == 1 && (args[0] == "start" || args[0] == "stop" || args[0] == "restart"):
 		return cmdCommand(args[0] + "-node")
+	case len(args) == 1 && args[0] == "attach":
+		return nodeAttach()
 	}
-	return errors.New("usage: nosana-host node start|stop|restart|find, or node import KEY")
+	return errors.New("usage: nosana-host node start|stop|restart|attach|find, or node import KEY")
 }
 
 // agreementURL is the Participation Agreement the node asks a host to accept on its first start.
