@@ -244,7 +244,7 @@ func (s *Supervisor) reconcile(ctx context.Context) error {
 		return err
 	}
 	defer func() { s.observe(ctx, ctr, image) }()
-	if swapNow && ctr != nil && s.current(ctr, image) {
+	if swapNow && ctr != nil && ctr.Config.Labels[LabelImage] == image && ctr.Config.Labels[labelNetwork] == s.network {
 		s.mu.Lock()
 		s.swapNow = false // nothing to swap: a later release waits as usual
 		s.mu.Unlock()
@@ -275,9 +275,9 @@ func (s *Supervisor) reconcile(ctx context.Context) error {
 			return err
 		}
 		s.restartDone() // only once it happened; podman may have been away
-		return s.startContainer(ctx, ctr.Config.Tty)
+		return s.startContainer(ctx)
 
-	case image != "" && !s.current(ctr, image) && (swapNow || s.MayInterrupt()):
+	case image != "" && (ctr.Config.Labels[LabelImage] != image || ctr.Config.Labels[labelNetwork] != s.network) && (swapNow || s.MayInterrupt()):
 		pulled, err := s.ensureImage(ctx, image) // the node keeps running during the pull
 		if err != nil || pulled {
 			return err // the swap waits for the next tick, which asks again whether the node is idle
@@ -302,38 +302,30 @@ func (s *Supervisor) reconcile(ctx context.Context) error {
 		s.mu.Unlock()
 		return nil
 	}
-	return s.restartExited(ctx, ctr)
-}
-
-// current reports whether ctr is the container the agent would create now.
-func (s *Supervisor) current(ctr *podman.Container, image string) bool {
-	return ctr.Config.Labels[LabelImage] == image && ctr.Config.Labels[labelNetwork] == s.network && ctr.Config.Tty
+	return s.restartExited(ctx, ctr.State.ExitCode)
 }
 
 // startContainer starts the node. Its terminal is sized before its process runs: without a size
 // the node's spinners flood the log.
-func (s *Supervisor) startContainer(ctx context.Context, tty bool) error {
-	if tty {
-		if err := s.pc.InitContainer(ctx, ContainerName); err != nil {
-			return fmt.Errorf("init node container: %w", err)
-		}
-		if err := s.pc.ResizeTTY(ctx, ContainerName, 120, 40); err != nil {
-			return fmt.Errorf("size the node's terminal: %w", err)
-		}
+func (s *Supervisor) startContainer(ctx context.Context) error {
+	if err := s.pc.InitContainer(ctx, ContainerName); err != nil {
+		return fmt.Errorf("init node container: %w", err)
+	}
+	if err := s.pc.ResizeTTY(ctx, ContainerName, 120, 40); err != nil {
+		return fmt.Errorf("size the node's terminal: %w", err)
 	}
 	return s.pc.StartContainer(ctx, ContainerName)
 }
 
 // restartExited starts an exited node again: at once when it asked for it or the owner started
 // it, otherwise with a backoff that doubles per crash.
-func (s *Supervisor) restartExited(ctx context.Context, ctr *podman.Container) error {
-	code := ctr.State.ExitCode
+func (s *Supervisor) restartExited(ctx context.Context, code int) error {
 	s.mu.Lock()
 	if s.start || code == exitRespawn {
 		s.start = false
 		s.mu.Unlock()
 		slog.Info("node: starting", "exitCode", code)
-		return s.startContainer(ctx, ctr.Config.Tty)
+		return s.startContainer(ctx)
 	}
 	if s.nextStart.IsZero() {
 		s.crashes++
@@ -355,7 +347,7 @@ func (s *Supervisor) restartExited(ctx context.Context, ctr *podman.Container) e
 	if !due {
 		return nil
 	}
-	return s.startContainer(ctx, ctr.Config.Tty)
+	return s.startContainer(ctx)
 }
 
 func (s *Supervisor) create(ctx context.Context, image string) error {
@@ -384,7 +376,7 @@ func (s *Supervisor) create(ctx context.Context, image string) error {
 		return fmt.Errorf("create node container: %w", err)
 	}
 	slog.Info("node: created and starting", "image", image)
-	return s.startContainer(ctx, true)
+	return s.startContainer(ctx)
 }
 
 // ensureImage pulls image when it is not here yet and reports whether it did.

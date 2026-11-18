@@ -116,7 +116,6 @@ type Container struct {
 	} `json:"State"`
 	Config struct {
 		Labels map[string]string `json:"Labels"`
-		Tty    bool              `json:"Tty"`
 	} `json:"Config"`
 }
 
