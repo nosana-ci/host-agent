@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nosana-ci/host-agent/internal/api"
 	"github.com/nosana-ci/host-agent/internal/local"
 	"github.com/nosana-ci/host-agent/internal/podman"
 )
@@ -97,6 +98,31 @@ func TestAttachNeedsARunningNodeWithATerminal(t *testing.T) {
 	} {
 		if _, err := attachTo(t, pc); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("got %v, want an error with %q", err, want)
+		}
+	}
+}
+
+// What node attach waits for, in the order the agent goes through.
+func TestNodeStart(t *testing.T) {
+	crashed := "node exited with code 1; restart 2 in 10s"
+	node := func(container string, desired api.NodeStatusDesired, lastError *string) api.NodeStatus {
+		return api.NodeStatus{Container: container, Desired: desired, Image: "node:1", LastError: lastError}
+	}
+	for name, c := range map[string]struct {
+		node    api.NodeStatus
+		moving  string
+		pulling bool
+		want    local.NodeStart
+	}{
+		"running":                   {node("running", api.Running, &crashed), "", false, local.NodeStart{Running: true}},
+		"a takeover goes first":     {node("missing", api.Stopped, nil), "the old node finishes its job first", true, local.NodeStart{Waiting: "the old node finishes its job first"}},
+		"stopped by its owner":      {node("exited", api.Stopped, nil), "", false, local.NodeStart{}},
+		"the image is being pulled": {node("missing", api.Running, &crashed), "", true, local.NodeStart{Waiting: "the agent pulls the node image node:1"}},
+		"a crash's backoff":         {node("exited", api.Running, &crashed), "", false, local.NodeStart{Waiting: crashed}},
+		"about to start":            {node("missing", api.Running, nil), "", false, local.NodeStart{Waiting: "the node container starts"}},
+	} {
+		if got := nodeStart(c.node, c.moving, c.pulling); got != c.want {
+			t.Errorf("%s: got %+v, want %+v", name, got, c.want)
 		}
 	}
 }

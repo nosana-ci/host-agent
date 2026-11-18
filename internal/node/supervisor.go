@@ -63,6 +63,7 @@ type Supervisor struct {
 	crashes   int
 	nextStart time.Time
 	swapNow   bool      // the owner asked for the update: the next image swap does not wait
+	pulling   bool      // the node image is being pulled
 	eventsAt  time.Time // the newest node state change reported as an event
 
 	// WaitingForSOL reports that the node wallet is below the SOL the node waits for at start.
@@ -401,7 +402,22 @@ func (s *Supervisor) ensureImage(ctx context.Context, image string) (bool, error
 		return false, err
 	}
 	slog.Info("node: pulling image", "image", image)
+	s.setPulling(true)
+	defer s.setPulling(false)
 	return true, s.pc.Pull(ctx, image)
+}
+
+func (s *Supervisor) setPulling(pulling bool) {
+	s.mu.Lock()
+	s.pulling = pulling
+	s.mu.Unlock()
+}
+
+// Pulling reports whether the node image is being pulled, which a first start waits for.
+func (s *Supervisor) Pulling() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.pulling
 }
 
 // Pull fetches the node image unless it is there already, so a node held back starts at once.

@@ -48,7 +48,7 @@ nosana-host status                 # what the console's host page shows: network
 nosana-host logs [node|agent|podman|job ID] -f   # the node container's log, a journal, or a job's container
 nosana-host doctor [--fix ID|all] [--yes]   # the host checks; --fix applies the fix of one check, or every fix there is
 nosana-host node start|stop|restart   # the node container, like the console's buttons
-nosana-host node attach            # the node's terminal with its keys (s: shut down after the job); Ctrl+C leaves, the node keeps running
+nosana-host node attach            # the node's terminal with its keys (s: shut down after the job), once the node runs; Ctrl+C leaves, the node keeps running
 nosana-host update [--check]       # install the current release now; --check only looks
 nosana-host config [set auto-update on|off]   # the settings and the install's values
 nosana-host register [--show]      # the node's email (and Discord, Twitter) and the Participation Agreement; shows and changes them later
@@ -82,6 +82,9 @@ Install script: `host-console/static/install.sh`.
   the node left; `logs node -f` on a terminal then shows what the node draws as it draws it.
   `node attach` joins the terminal with the keyboard too (`s` while a job runs: shut down after it;
   the node's own questions); Ctrl+C leaves and is not passed on, as it would stop the node. A
+  node that is on its way is waited for, with what its start waits for as the agent knows it (a
+  takeover from the old node, the image pull, a restart after a crash), so install.sh ends
+  there; a node its owner stopped is not. A
   container from before this has no terminal: it is recreated once the node may be interrupted,
   or at once by `update`.
 - **Heartbeat.** Every 15 s: agent version, the commands it accepts and its settings, update state,

@@ -156,7 +156,29 @@ func (d *daemon) localHandler() http.Handler {
 		}
 	})
 	mux.HandleFunc("POST /node/attach", d.attach)
+	// What node attach waits for before the node runs.
+	mux.HandleFunc("GET /node/start", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, nodeStart(d.sup.Status(), d.movingStatus(d.st.State()), d.sup.Pulling()))
+	})
 	return mux
+}
+
+// nodeStart says whether the node runs, and otherwise what its start waits for, in the order the
+// agent goes through: a takeover from the old node, the image, the container.
+func nodeStart(n api.NodeStatus, moving string, pulling bool) local.NodeStart {
+	switch {
+	case n.Container == "running":
+		return local.NodeStart{Running: true}
+	case moving != "":
+		return local.NodeStart{Waiting: moving}
+	case n.Desired == api.Stopped:
+		return local.NodeStart{}
+	case pulling:
+		return local.NodeStart{Waiting: "the agent pulls the node image " + n.Image}
+	case n.LastError != nil: // podman is not up yet, the release is not read yet, a crash's backoff
+		return local.NodeStart{Waiting: *n.LastError}
+	}
+	return local.NodeStart{Waiting: "the node container starts"}
 }
 
 // attach joins the CLI to the node's terminal: the request becomes a stream of what the node

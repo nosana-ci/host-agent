@@ -41,6 +41,13 @@ type Status struct {
 	Status       api.AgentStatus `json:"status"`
 }
 
+// NodeStart is whether the node runs, and what the start of a node that does not run waits
+// for. A node that neither runs nor waits is stopped, as its owner asked.
+type NodeStart struct {
+	Running bool   `json:"running"`
+	Waiting string `json:"waiting,omitempty"`
+}
+
 // Config is the config file as the CLI shows it: the install's values and the settings.
 type Config struct {
 	ControlURL string `json:"controlUrl"`

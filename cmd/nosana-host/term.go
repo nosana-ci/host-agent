@@ -28,12 +28,16 @@ const ctrlC = 0x03
 
 // nodeAttach joins this terminal to the node's: it shows what the node draws, and the keys typed
 // here are the node's (s while a job runs: shut down after it). Ctrl+C leaves, and is not
-// passed on: on the node's own terminal it would stop the node.
+// passed on: on the node's own terminal it would stop the node. A node that is on its way is
+// waited for (see waitForNode), so the install can end here.
 func nodeAttach() error {
 	if !isTerminal(os.Stdin) || !isTerminal(os.Stdout) {
 		return errors.New("node attach needs a terminal; nosana-host logs node -f follows the log without one")
 	}
 	ctx := context.Background()
+	if err := waitForNode(os.Stdout); err != nil {
+		return err
+	}
 	conn, err := local.Attach(ctx, "/node/attach")
 	if err != nil {
 		return err
@@ -72,6 +76,38 @@ func nodeAttach() error {
 	restore()
 	fmt.Println(screenReset + "\n" + msg)
 	return nil
+}
+
+// agentGrace is how long waitForNode waits for an agent that does not answer: an install has
+// just started it. waitEvery is how often it asks.
+var agentGrace, waitEvery = 15 * time.Second, 2 * time.Second
+
+// waitForNode returns once the node runs. Until then it says what the agent says the node's
+// start waits for (a takeover from the old node, the image pull, a restart after a crash), each
+// thing once. A node its owner stopped is not waited for.
+func waitForNode(out io.Writer) error {
+	said := ""
+	for begin := time.Now(); ; time.Sleep(waitEvery) {
+		var s local.NodeStart
+		err := agent(http.MethodGet, "/node/start", nil, &s)
+		switch {
+		case errors.Is(err, local.ErrNotRunning) && time.Since(begin) < agentGrace:
+			s.Waiting = "the agent starts"
+		case err != nil:
+			return err
+		case s.Running:
+			return nil
+		case s.Waiting == "":
+			return errors.New("the node is stopped; start it with: nosana-host node start")
+		}
+		if said == "" {
+			fmt.Fprintln(out, "waiting for the node to start, to show its terminal; Ctrl+C stops waiting, and the node starts either way")
+		}
+		if s.Waiting != said {
+			said = s.Waiting
+			fmt.Fprintln(out, "  "+said)
+		}
+	}
 }
 
 // followSize keeps the node's terminal the size of this one, so the node's spinners and bars
