@@ -80,7 +80,7 @@ Install script: `host-console/static/install.sh`.
   a size the spinners flood the log. The log holds every spinner frame (some 350 MB a day, capped
   at 200 MB): `logs node` writes it as the lines the node left, and `logs node -f` on a terminal
   then shows what the node draws. `sudo nosana-host node attach` is podman's attach, with Ctrl+C
-  as its detach key; it first waits for a node that is starting and says what for.
+  as its detach key; it first waits for a node that is starting.
 - **Heartbeat.** Every 15 s: agent version, the commands it accepts and its settings, update state,
   node state, GPU, disk, the host checks, the runtime, the network and the node wallet's SOL and NOS
   balances (read every minute from the Nosana kit's default RPC: Nosana's Ironforge endpoint on

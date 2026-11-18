@@ -11,7 +11,6 @@ import (
 	"net"
 	"slices"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/nosana-ci/host-agent/internal/api"
@@ -59,8 +58,6 @@ type Supervisor struct {
 
 	// WaitingForSOL reports that the node wallet is below the SOL the node waits for at start.
 	WaitingForSOL func() bool
-	// Pulling is set while the node image is pulled.
-	Pulling atomic.Bool
 }
 
 func New(pc *podman.Client, st *store.Store, network string) *Supervisor {
@@ -386,8 +383,6 @@ func (s *Supervisor) ensureImage(ctx context.Context, image string) (bool, error
 		return false, err
 	}
 	slog.Info("node: pulling image", "image", image)
-	s.Pulling.Store(true)
-	defer s.Pulling.Store(false)
 	return true, s.pc.Pull(ctx, image)
 }
 

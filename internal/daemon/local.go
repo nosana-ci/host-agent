@@ -153,32 +153,7 @@ func (d *daemon) localHandler() http.Handler {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 		}
 	})
-	mux.HandleFunc("GET /node/start", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, d.nodeStart(r.Context()))
-	})
 	return mux
-}
-
-// nodeStart says whether the node runs, and otherwise what its start waits for. Podman and the
-// state are asked: the supervisor's status is from before its last round, so stale right after
-// node stop or start.
-func (d *daemon) nodeStart(ctx context.Context) local.NodeStart {
-	state, n := d.st.State(), d.sup.Status()
-	ctr, err := d.pc.InspectContainer(ctx, node.ContainerName)
-	moving := d.movingStatus(state)
-	switch {
-	case err == nil && ctr.State.Running:
-		return local.NodeStart{Running: true}
-	case moving != "":
-		return local.NodeStart{Waiting: moving}
-	case state.NodeStopped:
-		return local.NodeStart{}
-	case d.sup.Pulling.Load():
-		return local.NodeStart{Waiting: "the agent pulls the node image " + n.Image}
-	case n.LastError != nil: // podman is not up yet, no release yet, a crash's backoff
-		return local.NodeStart{Waiting: *n.LastError}
-	}
-	return local.NodeStart{Waiting: "the node container starts"}
 }
 
 // logs streams one log: the node container, the agent's or podman's journal, or a job's main

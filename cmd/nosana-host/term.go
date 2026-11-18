@@ -35,9 +35,7 @@ func nodeAttach() error {
 	if !isTerminal(os.Stdin) || !isTerminal(os.Stdout) {
 		return errors.New("node attach needs a terminal; nosana-host logs node -f follows the log without one")
 	}
-	if err := waitForNode(os.Stdout); err != nil {
-		return err
-	}
+	waitForNode()
 	lines := termlines.NewWriter(os.Stdout, true) // the node only draws what changes: its last lines first
 	lines.Open = true
 	_ = readNodeLog(context.Background(), 20, time.Time{}, false, lines)
@@ -59,29 +57,16 @@ func nodeAttach() error {
 	return nil
 }
 
-// agentGrace is how long an agent that does not answer is waited for: an install just started it.
-var agentGrace, waitEvery = 15 * time.Second, 2 * time.Second
-
-// waitForNode returns once the node runs, and until then says what the agent says its start
-// waits for. A node its owner stopped is not waited for.
-func waitForNode(out io.Writer) error {
-	said := ""
-	for begin := time.Now(); ; time.Sleep(waitEvery) {
-		var s local.NodeStart
-		err := agent(http.MethodGet, "/node/start", nil, &s)
-		switch {
-		case errors.Is(err, local.ErrNotRunning) && time.Since(begin) < agentGrace:
-			s.Waiting = "the agent starts"
-		case err != nil:
-			return err
-		case s.Running:
-			return nil
-		case s.Waiting == "":
-			return errors.New("the node is stopped; start it with: nosana-host node start")
+// waitForNode returns once the node container runs: after an install that takes a while.
+func waitForNode() {
+	pc := podman.New(config.PodmanSocket)
+	for said := false; ; time.Sleep(2 * time.Second) {
+		if ctr, err := pc.InspectContainer(context.Background(), node.ContainerName); err == nil && ctr.State.Running {
+			return
 		}
-		if s.Waiting != said {
-			said = s.Waiting
-			fmt.Fprintln(out, "waiting for the node (Ctrl+C stops waiting, not the node):", said)
+		if !said {
+			said = true
+			fmt.Println("waiting for the node to start (a first start downloads its image; nosana-host status shows more). Ctrl+C stops waiting, not the node")
 		}
 	}
 }
