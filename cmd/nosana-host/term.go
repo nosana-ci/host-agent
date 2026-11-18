@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -18,6 +19,7 @@ import (
 	"github.com/nosana-ci/host-agent/internal/node"
 	"github.com/nosana-ci/host-agent/internal/podman"
 	"github.com/nosana-ci/host-agent/internal/termlines"
+	"github.com/nosana-ci/host-agent/internal/upgrade"
 )
 
 // screenReset ends what the node drew on this terminal: its colors, and the cursor its spinners
@@ -35,10 +37,7 @@ func nodeAttach() error {
 		return errors.New("node attach needs a terminal; nosana-host logs node -f follows the log without one")
 	}
 	ctx := context.Background()
-	if err := waitForNode(os.Stdout); err != nil {
-		return err
-	}
-	conn, err := local.Attach(ctx, "/node/attach")
+	conn, err := attachWhenRunning(ctx, os.Stdout)
 	if err != nil {
 		return err
 	}
@@ -76,6 +75,22 @@ func nodeAttach() error {
 	restore()
 	fmt.Println(screenReset + "\n" + msg)
 	return nil
+}
+
+// attachWhenRunning opens the node's terminal once the node runs. A node that stopped between
+// the agent's answer and the attach is waited for again.
+func attachWhenRunning(ctx context.Context, out io.Writer) (net.Conn, error) {
+	for {
+		if err := waitForNode(out); err != nil {
+			return nil, err
+		}
+		conn, err := local.Attach(ctx, "/node/attach")
+		var status *upgrade.StatusError
+		if !errors.As(err, &status) || status.Code != http.StatusConflict {
+			return conn, err
+		}
+		time.Sleep(waitEvery)
+	}
 }
 
 // agentGrace is how long waitForNode waits for an agent that does not answer: an install has

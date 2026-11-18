@@ -157,10 +157,29 @@ func (d *daemon) localHandler() http.Handler {
 	})
 	mux.HandleFunc("POST /node/attach", d.attach)
 	// What node attach waits for before the node runs.
-	mux.HandleFunc("GET /node/start", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, nodeStart(d.sup.Status(), d.movingStatus(d.st.State()), d.sup.Pulling()))
+	mux.HandleFunc("GET /node/start", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, d.nodeStartNow(r.Context()))
 	})
 	return mux
+}
+
+// nodeStartNow is nodeStart on what is true this moment. The supervisor's view is from its last
+// round, and from before what that round did: a node just stopped or started still reads there
+// as it was. So whether the container runs is asked of podman, and whether the node should run
+// of the state the owner's command wrote.
+func (d *daemon) nodeStartNow(ctx context.Context) local.NodeStart {
+	n, state := d.sup.Status(), d.st.State()
+	n.Desired = api.Running
+	if state.NodeStopped {
+		n.Desired = api.Stopped
+	}
+	switch ctr, err := d.pc.InspectContainer(ctx, node.ContainerName); {
+	case err == nil:
+		n.Container = ctr.State.Status
+	case errors.Is(err, podman.ErrNotFound):
+		n.Container = "missing"
+	}
+	return nodeStart(n, d.movingStatus(state), d.sup.Pulling())
 }
 
 // nodeStart says whether the node runs, and otherwise what its start waits for, in the order the
@@ -182,7 +201,8 @@ func nodeStart(n api.NodeStatus, moving string, pulling bool) local.NodeStart {
 }
 
 // attach joins the CLI to the node's terminal: the request becomes a stream of what the node
-// draws, and what the CLI sends is the node's keyboard.
+// draws, and what the CLI sends is the node's keyboard. A node that does not run is a conflict
+// (409), which the CLI waits out when the node is on its way.
 func (d *daemon) attach(w http.ResponseWriter, r *http.Request) {
 	ctr, err := d.pc.InspectContainer(r.Context(), node.ContainerName)
 	switch {
@@ -193,7 +213,7 @@ func (d *daemon) attach(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	case !ctr.Config.Tty:
-		http.Error(w, "this node container has no terminal yet: it gets one when the node is next idle, or now with nosana-host update", http.StatusConflict)
+		http.Error(w, "this node container has no terminal yet: it gets one when the node is next idle, or now with nosana-host update", http.StatusUnprocessableEntity)
 		return
 	}
 	term, err := d.pc.Attach(r.Context(), node.ContainerName)

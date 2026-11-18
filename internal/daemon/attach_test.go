@@ -11,7 +11,9 @@ import (
 
 	"github.com/nosana-ci/host-agent/internal/api"
 	"github.com/nosana-ci/host-agent/internal/local"
+	"github.com/nosana-ci/host-agent/internal/node"
 	"github.com/nosana-ci/host-agent/internal/podman"
+	"github.com/nosana-ci/host-agent/internal/store"
 )
 
 // serveUnix serves h on a unix socket in a temporary directory and returns the socket's path.
@@ -33,7 +35,11 @@ func serveUnix(t *testing.T, h http.Handler) string {
 func fakePodman(t *testing.T, running, tty bool) *podman.Client {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v5.0.0/libpod/containers/nosana-node/json", func(w http.ResponseWriter, _ *http.Request) {
-		fmt.Fprintf(w, `{"State":{"Running":%t},"Config":{"Tty":%t}}`, running, tty)
+		status := "exited"
+		if running {
+			status = "running"
+		}
+		fmt.Fprintf(w, `{"State":{"Status":%q,"Running":%t},"Config":{"Tty":%t}}`, status, running, tty)
 	})
 	mux.HandleFunc("POST /v5.0.0/libpod/containers/nosana-node/attach", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("stdin") != "true" || r.URL.Query()["detachKeys"] == nil {
@@ -124,5 +130,28 @@ func TestNodeStart(t *testing.T) {
 		if got := nodeStart(c.node, c.moving, c.pulling); got != c.want {
 			t.Errorf("%s: got %+v, want %+v", name, got, c.want)
 		}
+	}
+}
+
+// node stop, node start and node attach in a row: the supervisor has not been round yet, so its
+// view still has the node stopped, or running. What podman and the owner's last command say counts.
+func TestNodeStartNowDoesNotTrustTheSupervisorsLastRound(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = st.Update(func(s *store.State) { s.NodeStopped = true })
+	exited := fakePodman(t, false, true)
+	d := &daemon{pc: exited, st: st, sup: node.New(exited, st, "mainnet")} // the supervisor saw: stopped
+	if got := d.nodeStartNow(context.Background()); got != (local.NodeStart{}) {
+		t.Fatalf("a stopped node: got %+v", got)
+	}
+	_ = st.Update(func(s *store.State) { s.NodeStopped = false }) // node start
+	if got := d.nodeStartNow(context.Background()); got.Running || got.Waiting == "" {
+		t.Fatalf("a node just started is waited for: got %+v", got)
+	}
+	d.pc = fakePodman(t, true, true) // the container runs before the supervisor's next round
+	if got := d.nodeStartNow(context.Background()); !got.Running {
+		t.Fatalf("a running container: got %+v", got)
 	}
 }

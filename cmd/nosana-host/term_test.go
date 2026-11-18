@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"path/filepath"
@@ -15,13 +17,24 @@ import (
 )
 
 // fakeAgent answers GET /node/start with the given answers in turn, the last one from then on.
+// Its attach finds the node not running the first time, as when the node stopped in between.
 func fakeAgent(t *testing.T, answers ...local.NodeStart) {
 	t.Helper()
-	asked := 0
+	asked, attached := 0, 0
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /node/start", func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(answers[min(asked, len(answers)-1)])
 		asked++
+	})
+	mux.HandleFunc("POST /node/attach", func(w http.ResponseWriter, _ *http.Request) {
+		if attached++; attached == 1 {
+			http.Error(w, "the node is not running", http.StatusConflict)
+			return
+		}
+		conn, buf, _ := http.NewResponseController(w).Hijack()
+		defer conn.Close()
+		_, _ = buf.WriteString("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: tcp\r\n\r\nframe")
+		_ = buf.Flush()
 	})
 	old, every := local.SocketPath, waitEvery
 	local.SocketPath, waitEvery = filepath.Join(t.TempDir(), "cli.sock"), time.Millisecond
@@ -76,5 +89,19 @@ func TestWaitForNodeGivesAStartingAgentTime(t *testing.T) {
 	var out bytes.Buffer
 	if err := waitForNode(&out); !errors.Is(err, local.ErrNotRunning) || !strings.Contains(out.String(), "the agent starts") {
 		t.Fatalf("got %v, %q", err, out.String())
+	}
+}
+
+// The agent's answer and the attach are two requests: a node that stopped in between (it was
+// just stopped, or it restarts) is waited for again instead of an error.
+func TestAttachWaitsAgainWhenTheNodeStoppedInBetween(t *testing.T) {
+	fakeAgent(t, local.NodeStart{Running: true})
+	conn, err := attachWhenRunning(context.Background(), &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if got, _ := io.ReadAll(conn); string(got) != "frame" {
+		t.Fatalf("got %q", got)
 	}
 }
