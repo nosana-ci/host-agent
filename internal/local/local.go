@@ -40,8 +40,7 @@ type Status struct {
 	Status       api.AgentStatus `json:"status"`
 }
 
-// NodeStart is whether the node runs, and what the start of a node that does not run waits
-// for. A node that neither runs nor waits is stopped, as its owner asked.
+// NodeStart is whether the node runs, or what its start waits for; neither: its owner stopped it.
 type NodeStart struct {
 	Running bool   `json:"running"`
 	Waiting string `json:"waiting,omitempty"`

@@ -36,12 +36,10 @@ jobs), stops its container (only one whose `/root/.nosana` holds this key) and d
 policy, and starts its own node once the old one no longer answers at the node's public domain. From then on it
 stops the old node whenever it runs again (the market queue holds one node per key).
 `sudo nosana-host uninstall` and the `start.sh` command undo it. `nosana-host install` finds such a
-node itself and, on a terminal, offers to move it; `--import-key KEY` moves it without asking, and
-an install with a node in docker that is not moved stops, since two nodes would share the GPU. When
-none runs, the key an earlier node left in `~/.nosana` (of the user who ran sudo, or of root) is
-offered to an agent that has no wallet yet. With a key, the agent is installed held (`--hold`:
-stopped and disabled, without a wallet, so it does not make one and link that to the account), and
-the key is then imported. The install script only passes its arguments on.
+node and, on a terminal, offers to move it (`--import-key KEY` moves it without asking; otherwise
+the install stops, as two nodes would share the GPU). With no node in docker it offers the key an
+earlier node left in `~/.nosana`. With a key it installs with `--hold`, which leaves the agent
+stopped and disabled without a wallet, and imports the key.
 
 Supported: Ubuntu 22.04/24.04/26.04 and Debian 12/13 on x86-64, with the NVIDIA driver (R550 or
 newer), nvidia-container-toolkit and a CDI spec for the GPU; the console's health panel shows
@@ -52,7 +50,7 @@ nosana-host status                 # what the console's host page shows: network
 nosana-host logs [node|agent|podman|job ID] -f   # the node container's log, a journal, or a job's container
 nosana-host doctor [--fix ID|all] [--yes]   # the host checks; --fix applies the fix of one check, or every fix there is
 nosana-host node start|stop|restart   # the node container, like the console's buttons
-sudo nosana-host node attach       # the node's terminal with its keys (s: shut down after the job), once the node runs; Ctrl+C leaves, the node keeps running
+sudo nosana-host node attach       # the node's terminal, with its keys (s: shut down after the job); Ctrl+C leaves, the node keeps running
 nosana-host update [--check]       # install the current release now; --check only looks
 nosana-host config [set auto-update on|off]   # the settings and the install's values
 nosana-host register [--show]      # the node's email (and Discord, Twitter) and the Participation Agreement; shows and changes them later
@@ -78,21 +76,12 @@ Install script: `host-console/static/install.sh`.
   (exit 129) or with a backoff when it crashes, keeps it stopped when the owner said so, and swaps
   the image when the release changes it and the node may be interrupted (see Updates).
 - **The node's terminal.** The container has a terminal, as under start.sh, so the node draws its
-  spinners and progress bars and reads keys. The agent sizes the terminal (120x40) before the
-  node's process starts, since on a terminal without a size the spinners flood the log with cursor
-  moves, and a CLI that watches sends its own size. The container's log is therefore everything
-  the node drew, every spinner frame included: some 3 to 4 kB a second, capped at 200 MB (half a
-  day to a day), after which podman starts the file over. `logs node` writes that log as the lines
-  the node left (a spinner or bar is its last drawing; bars redrawn together, as the layers of a
-  pull, repeat); `logs node -f` on a terminal then shows what the node draws as it draws it.
-  `sudo nosana-host node attach` is podman's own attach to that terminal, with the keyboard
-  (`s` while a job runs: shut down after it; the node's own questions); Ctrl+C is its detach
-  key, so it leaves and is not passed on, as it would stop the node. It needs sudo because
-  podman's socket is root's. A node that is on its way is waited for, with what its start waits
-  for as the agent knows it (a takeover from the old node, the image pull, a restart after a
-  crash), so install.sh ends there; a node its owner stopped is not. A
-  container from before this has no terminal: it is recreated once the node may be interrupted,
-  or at once by `update`.
+  spinners and reads keys. The agent sizes it (120x40) before the node's process starts: without
+  a size the spinners flood the log. The log holds every spinner frame (some 350 MB a day, capped
+  at 200 MB): `logs node` writes it as the lines the node left, and `logs node -f` on a terminal
+  then shows what the node draws. `sudo nosana-host node attach` is podman's attach, with Ctrl+C
+  as its detach key; it first waits for a node that is starting and says what for. A container
+  from before this has no terminal and is recreated once the node may be interrupted.
 - **Heartbeat.** Every 15 s: agent version, the commands it accepts and its settings, update state,
   node state, GPU, disk, the host checks, the runtime, the network and the node wallet's SOL and NOS
   balances (read every minute from the Nosana kit's default RPC: Nosana's Ironforge endpoint on

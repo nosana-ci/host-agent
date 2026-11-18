@@ -144,8 +144,7 @@ type Spec struct {
 	Network    string
 	Ports      []Port
 	LogSizeMax int64
-	// Terminal gives the container a terminal and keeps its stdin open, for podman attach.
-	Terminal bool
+	Terminal   bool // a terminal, with stdin open
 }
 
 func (c *Client) CreateContainer(ctx context.Context, s Spec) error {
@@ -167,13 +166,11 @@ func (c *Client) CreateContainer(ctx context.Context, s Spec) error {
 	return c.call(ctx, http.MethodPost, "/containers/create", nil, body, nil)
 }
 
-// InitContainer prepares the container without starting its process, which is when its terminal
-// can first be sized.
+// InitContainer prepares the container without starting its process: its terminal can then be sized.
 func (c *Client) InitContainer(ctx context.Context, name string) error {
 	return c.call(ctx, http.MethodPost, "/containers/"+url.PathEscape(name)+"/init", nil, nil, nil)
 }
 
-// ResizeTTY sets the size of the container's terminal; the container is initialized or running.
 func (c *Client) ResizeTTY(ctx context.Context, name string, cols, rows int) error {
 	q := url.Values{"w": {strconv.Itoa(cols)}, "h": {strconv.Itoa(rows)}}
 	return c.call(ctx, http.MethodPost, "/containers/"+url.PathEscape(name)+"/resize", q, nil, nil)
@@ -188,8 +185,8 @@ func (c *Client) StopContainer(ctx context.Context, name string, timeout time.Du
 	return c.call(ctx, http.MethodPost, "/containers/"+url.PathEscape(name)+"/stop", q, nil, nil)
 }
 
-// Logs writes the container's last tail lines (all when 0) to w, or what it wrote since a time
-// when since is not zero, and keeps following when follow is set, until ctx ends.
+// Logs writes the container's last tail lines (all when 0) to w, or what it wrote since a time,
+// and keeps following when follow is set, until ctx ends.
 func (c *Client) Logs(ctx context.Context, name string, tail int, since time.Time, follow bool, w io.Writer) error {
 	q := url.Values{"stdout": {"true"}, "stderr": {"true"}, "follow": {strconv.FormatBool(follow)}}
 	if tail > 0 {

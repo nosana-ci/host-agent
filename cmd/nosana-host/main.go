@@ -36,17 +36,14 @@ const usage = `nosana-host runs the Nosana node on this machine and reports to h
 
 Usage:
   nosana-host install --control-url URL --release-url URL --network mainnet|devnet [--token T] [--import-key KEY] [--hold]
-                                        install or repair (sudo). A node that runs in docker here has to move to the agent with its
-                                        key: asked on a terminal, or --import-key KEY; the key of an earlier node in ~/.nosana is
-                                        offered too. --hold leaves the agent stopped until node import gives it its key
+                                        install or repair (sudo); --import-key makes KEY the node wallet, as node import does;
+                                        --hold leaves the agent stopped until node import gives it its key
   nosana-host uninstall [--purge]       remove the services; --purge also deletes state after backing the wallet up (sudo)
   nosana-host status                    link, wallet, node, GPU, disk, checks and update state
-  nosana-host logs [node|agent|podman|job ID] [-f] [-n N]   the node container's log, a journal, or a job's container;
-                                        logs node -f on a terminal shows the node's spinners and bars as it draws them
+  nosana-host logs [node|agent|podman|job ID] [-f] [-n N]   the node container's log, a journal, or a job's container
   nosana-host doctor [--fix ID|all] [--yes]   run the host checks; --fix applies the fix of one check, or of every check that has one
   nosana-host node start|stop|restart   the node container; a stopped node stays stopped until started
-  nosana-host node attach               the node's terminal, with its keys (s: shut down after the job), once the node runs (sudo);
-                                        Ctrl+C leaves, the node keeps running
+  nosana-host node attach               the node's terminal, with its keys (sudo); Ctrl+C leaves, the node keeps running
   nosana-host node import KEY           make KEY the node wallet (sudo); takes over the node that runs in docker with it (start.sh)
   nosana-host node find                 the nodes that run in docker on this machine: address and key file
   nosana-host update [--check]          install the current release now, also while the node is busy; --check only looks
@@ -133,9 +130,7 @@ func cmdInstall(args []string) error {
 	return install.Run(context.Background(), cfg, opts, os.Stdout)
 }
 
-// askTerminal is a yes or no question on the controlling terminal, yes unless the answer starts
-// with n; nil when there is no terminal. Not stdin: install.sh pipes the script into the shell
-// that runs the install.
+// askTerminal asks a yes or no question on the terminal (stdin is install.sh's pipe); nil without one.
 func askTerminal() func(question string) bool {
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
 	if err != nil {
@@ -420,7 +415,7 @@ func linked(claimed, pending bool) string {
 }
 
 // cmdLogs streams a log through the agent. While the agent is down, a journal is read directly,
-// and the node's log from podman's socket, which is root's (see nodeLog).
+// and a container's log from podman's socket, which is root's.
 func cmdLogs(args []string) error {
 	fs := flag.NewFlagSet("logs", flag.ExitOnError)
 	follow := fs.Bool("f", false, "keep following")
@@ -578,8 +573,8 @@ func onOff(b bool) string {
 	return "off"
 }
 
-// cmdNode runs the console's start-node, stop-node or restart-node, joins the node's terminal,
-// imports a node key, or lists the nodes that run in docker.
+// cmdNode runs the console's start-node, stop-node or restart-node, imports a node key, or lists
+// the nodes that run in docker.
 func cmdNode(args []string) error {
 	switch {
 	case len(args) == 2 && args[0] == "import":

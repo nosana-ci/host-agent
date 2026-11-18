@@ -11,6 +11,7 @@ import (
 	"net"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nosana-ci/host-agent/internal/api"
@@ -27,20 +28,11 @@ const (
 	apiPort       = 15001 // the node's port 5001, published on localhost
 	LabelImage    = "io.nosana.host.image"
 	labelNetwork  = "io.nosana.host.network"
-	labelSpec     = "io.nosana.host.spec"
-	// specVersion changes with the container's definition; a container made with another one is
-	// recreated once the node is idle. 2: a terminal, so the node draws its spinners and bars and
-	// reads keys (logs node -f, node attach).
-	specVersion = "2"
-	// The terminal's size until a CLI that watches it sends its own.
-	termCols, termRows = 120, 40
-	// With a terminal every frame of a spinner is in the log, some 3 to 4 kB a second, and podman
-	// starts the file over when it is full: this holds half a day to a day of it.
-	logSizeMax  = 200 << 20
-	tick        = 5 * time.Second
-	stopTimeout = 2 * time.Minute
-	maxBackoff  = 5 * time.Minute
-	stableAfter = 2 * time.Minute // running this long forgets earlier crashes
+	logSizeMax    = 200 << 20 // on a terminal every spinner frame is logged: some 350 MB a day
+	tick          = 5 * time.Second
+	stopTimeout   = 2 * time.Minute
+	maxBackoff    = 5 * time.Minute
+	stableAfter   = 2 * time.Minute // running this long forgets earlier crashes
 	// maxWait is how long a change that stops the node waits for a node in the queue (or one
 	// whose API does not answer); jobs and benchmarks are always waited for.
 	maxWait = 24 * time.Hour
@@ -63,11 +55,12 @@ type Supervisor struct {
 	crashes   int
 	nextStart time.Time
 	swapNow   bool      // the owner asked for the update: the next image swap does not wait
-	pulling   bool      // the node image is being pulled
 	eventsAt  time.Time // the newest node state change reported as an event
 
 	// WaitingForSOL reports that the node wallet is below the SOL the node waits for at start.
 	WaitingForSOL func() bool
+	// Pulling is set while the node image is pulled.
+	Pulling atomic.Bool
 }
 
 func New(pc *podman.Client, st *store.Store, network string) *Supervisor {
@@ -314,18 +307,17 @@ func (s *Supervisor) reconcile(ctx context.Context) error {
 
 // current reports whether ctr is the container the agent would create now.
 func (s *Supervisor) current(ctr *podman.Container, image string) bool {
-	l := ctr.Config.Labels
-	return l[LabelImage] == image && l[labelNetwork] == s.network && l[labelSpec] == specVersion
+	return ctr.Config.Labels[LabelImage] == image && ctr.Config.Labels[labelNetwork] == s.network && ctr.Config.Tty
 }
 
-// startContainer starts the node. Its terminal gets a size before its process runs: on a
-// terminal without one the node's spinners flood the log with cursor moves.
+// startContainer starts the node. Its terminal is sized before its process runs: without a size
+// the node's spinners flood the log.
 func (s *Supervisor) startContainer(ctx context.Context, tty bool) error {
 	if tty {
 		if err := s.pc.InitContainer(ctx, ContainerName); err != nil {
 			return fmt.Errorf("init node container: %w", err)
 		}
-		if err := s.pc.ResizeTTY(ctx, ContainerName, termCols, termRows); err != nil {
+		if err := s.pc.ResizeTTY(ctx, ContainerName, 120, 40); err != nil {
 			return fmt.Errorf("size the node's terminal: %w", err)
 		}
 	}
@@ -378,7 +370,7 @@ func (s *Supervisor) create(ctx context.Context, image string) error {
 		Image:   image,
 		Command: []string{"start", "--network", s.network},
 		Env:     map[string]string{"NOSANA_HOST_VERSION": version.Version},
-		Labels:  map[string]string{LabelImage: image, labelNetwork: s.network, labelSpec: specVersion},
+		Labels:  map[string]string{LabelImage: image, labelNetwork: s.network},
 		Mounts: []podman.Mount{
 			{Source: config.NodeDir, Destination: "/root/.nosana"},
 			{Source: config.PodmanSocketDir, Destination: "/root/.nosana/podman"},
@@ -402,22 +394,9 @@ func (s *Supervisor) ensureImage(ctx context.Context, image string) (bool, error
 		return false, err
 	}
 	slog.Info("node: pulling image", "image", image)
-	s.setPulling(true)
-	defer s.setPulling(false)
+	s.Pulling.Store(true)
+	defer s.Pulling.Store(false)
 	return true, s.pc.Pull(ctx, image)
-}
-
-func (s *Supervisor) setPulling(pulling bool) {
-	s.mu.Lock()
-	s.pulling = pulling
-	s.mu.Unlock()
-}
-
-// Pulling reports whether the node image is being pulled, which a first start waits for.
-func (s *Supervisor) Pulling() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.pulling
 }
 
 // Pull fetches the node image unless it is there already, so a node held back starts at once.

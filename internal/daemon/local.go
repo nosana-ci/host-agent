@@ -143,69 +143,50 @@ func (d *daemon) localHandler() http.Handler {
 	mux.HandleFunc("GET /logs/job/{id}", func(w http.ResponseWriter, r *http.Request) {
 		d.logs(w, r, "job", r.PathValue("id"))
 	})
-	// The size of the terminal that watches the node, so its spinners and bars fit that terminal.
+	// The size of the terminal that watches the node, so its spinners fit there.
 	mux.HandleFunc("POST /node/resize", func(w http.ResponseWriter, r *http.Request) {
 		cols, _ := strconv.Atoi(r.URL.Query().Get("w"))
 		rows, _ := strconv.Atoi(r.URL.Query().Get("h"))
 		if cols < 1 || rows < 1 {
 			http.Error(w, "w and h are the terminal's columns and rows", http.StatusBadRequest)
-			return
-		}
-		if err := d.pc.ResizeTTY(r.Context(), node.ContainerName, cols, rows); err != nil {
+		} else if err := d.pc.ResizeTTY(r.Context(), node.ContainerName, cols, rows); err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 		}
 	})
-	// What node attach waits for before the node runs.
 	mux.HandleFunc("GET /node/start", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, d.nodeStartNow(r.Context()))
+		writeJSON(w, d.nodeStart(r.Context()))
 	})
 	return mux
 }
 
-// nodeStartNow is nodeStart on what is true this moment. The supervisor's view is from its last
-// round, and from before what that round did: a node just stopped or started still reads there
-// as it was. So whether the container runs is asked of podman, and whether the node should run
-// of the state the owner's command wrote.
-func (d *daemon) nodeStartNow(ctx context.Context) local.NodeStart {
-	n, state := d.sup.Status(), d.st.State()
-	n.Desired = api.Running
-	if state.NodeStopped {
-		n.Desired = api.Stopped
-	}
-	switch ctr, err := d.pc.InspectContainer(ctx, node.ContainerName); {
-	case err == nil:
-		n.Container = ctr.State.Status
-	case errors.Is(err, podman.ErrNotFound):
-		n.Container = "missing"
-	}
-	return nodeStart(n, d.movingStatus(state), d.sup.Pulling())
-}
-
-// nodeStart says whether the node runs, and otherwise what its start waits for, in the order the
-// agent goes through: a takeover from the old node, the image, the container.
-func nodeStart(n api.NodeStatus, moving string, pulling bool) local.NodeStart {
+// nodeStart says whether the node runs, and otherwise what its start waits for. Podman and the
+// state are asked: the supervisor's status is from before its last round, so stale right after
+// node stop or start.
+func (d *daemon) nodeStart(ctx context.Context) local.NodeStart {
+	state, n := d.st.State(), d.sup.Status()
+	ctr, err := d.pc.InspectContainer(ctx, node.ContainerName)
+	moving := d.movingStatus(state)
 	switch {
-	case n.Container == "running":
+	case err == nil && ctr.State.Running:
 		return local.NodeStart{Running: true}
 	case moving != "":
 		return local.NodeStart{Waiting: moving}
-	case n.Desired == api.Stopped:
+	case state.NodeStopped:
 		return local.NodeStart{}
-	case pulling:
+	case d.sup.Pulling.Load():
 		return local.NodeStart{Waiting: "the agent pulls the node image " + n.Image}
-	case n.LastError != nil: // podman is not up yet, the release is not read yet, a crash's backoff
+	case n.LastError != nil: // podman is not up yet, no release yet, a crash's backoff
 		return local.NodeStart{Waiting: *n.LastError}
 	}
 	return local.NodeStart{Waiting: "the node container starts"}
 }
 
 // logs streams one log: the node container, the agent's or podman's journal, or a job's main
-// container, which the node names "<job id>-0" after the operation index. A container's log can
-// start at a time (since, in Unix nanoseconds) instead of a number of lines back.
+// container, which the node names "<job id>-0" after the operation index.
 func (d *daemon) logs(w http.ResponseWriter, r *http.Request, what, jobID string) {
 	tail, _ := strconv.Atoi(r.URL.Query().Get("tail")) // 0 or missing: everything
 	follow := r.URL.Query().Get("follow") == "true"
-	var since time.Time
+	var since time.Time // Unix nanoseconds: a container's log from then on
 	if ns, err := strconv.ParseInt(r.URL.Query().Get("since"), 10, 64); err == nil {
 		since = time.Unix(0, ns)
 	}

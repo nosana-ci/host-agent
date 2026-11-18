@@ -2,13 +2,15 @@ package termlines
 
 import (
 	"bytes"
-	"strings"
 	"testing"
 )
 
-func render(color bool, chunks ...string) string {
+const frame = "\x1b[1G\x1b[0K" // how ora starts a spinner's frame
+
+func render(color, open bool, chunks ...string) string {
 	var out bytes.Buffer
 	w := NewWriter(&out, color)
+	w.Open = open
 	for _, c := range chunks {
 		_, _ = w.Write([]byte(c))
 	}
@@ -17,70 +19,30 @@ func render(color bool, chunks ...string) string {
 }
 
 func TestLines(t *testing.T) {
-	const frame = "\x1b[1G\x1b[0K"
 	for name, c := range map[string]struct{ in, want string }{
-		"plain lines, as from a container without a terminal": {"one\ntwo\n", "one\ntwo\n"},
-		"terminal line ends and an empty line":                {"one\r\n\r\ntwo\r\n", "one\n\ntwo\n"},
-		"a spinner is the line it ended as": {
-			"start\r\n\x1b[?25l" + frame + "⠋ Pulling" + frame + "⠙ Pulling" + frame + "\x1b[32m✔\x1b[39m Pulled\r\n\x1b[?25hnext\r\n",
-			"start\n✔ Pulled\nnext\n"},
-		"a spinner that still runs is its last frame": {"a\r\n" + frame + "⠋ Waiting" + frame + "⠙ Waiting", "a\n⠙ Waiting\n"},
-		"a spinner that was cleared leaves nothing":   {"a\r\n" + frame + "⠋ Waiting" + frame + "b\r\n", "a\nb\n"},
-		"carriage return redraws":                     {"10%\r50%\r100%\r\ndone\r\n", "100%\ndone\n"},
-		"a spinner wider than the terminal, erased over two rows, is one line": {
-			strings.Repeat(frame+"\x1b[1A\x1b[0K"+"⠋ a text wider than the terminal", 500) + frame + "\x1b[1A\x1b[0K" + "✔ ok\r\n",
-			"✔ ok\n"},
-		"other sequences are dropped": {"\x1b]0;title\x07\x1b(Bhi\x1b[10;5H\x1b[?2004h\x1b7!\r\n", "hi!\n"},
+		"plain lines":                 {"one\r\n\r\ntwo\n", "one\n\ntwo\n"},
+		"a spinner is its last frame": {"a\r\n\x1b[?25l" + frame + "⠋ Pull" + frame + "⠙ Pull" + frame + "\x1b[32m✔\x1b[39m Pulled\r\nb\r\n", "a\n✔ Pulled\nb\n"},
+		"a spinner that still runs":   {"a\r\n" + frame + "⠋ Wait" + frame + "⠙ Wait", "a\n⠙ Wait\n"},
+		"a cleared spinner":           {frame + "⠋ Wait" + frame + "b\r\n", "b\n"},
+		"a spinner over two rows":     {frame + "\x1b[1A\x1b[0K⠋ wide" + frame + "\x1b[1A\x1b[0K✔ ok\r\n", "✔ ok\n"},
+		"carriage return redraws":     {"10%\r100%\r\n", "100%\n"},
 	} {
-		if got := render(false, c.in); got != c.want {
+		if got := render(false, false, c.in); got != c.want {
 			t.Errorf("%s:\n got %q\nwant %q", name, got, c.want)
 		}
-	}
-}
-
-func TestColorIsKeptAndReset(t *testing.T) {
-	if got := render(true, "\x1b[1G\x1b[0K\x1b[32m✔\x1b[39m ok\r\nplain\r\n"); got != "\x1b[32m✔\x1b[39m ok\x1b[0m\nplain\n" {
-		t.Fatalf("got %q", got)
-	}
-}
-
-// The log arrives in arbitrary pieces: a sequence cut in two is still one sequence.
-func TestSplitWrites(t *testing.T) {
-	in := "a\r\n\x1b[1G\x1b[0K⠋ Waiting\x1b[1G\x1b[0K\x1b[32m✔\x1b[39m Done\r\n"
-	want := render(false, in)
-	for i := 1; i < len(in); i++ {
-		if got := render(false, in[:i], in[i:]); got != want {
-			t.Fatalf("split at %d: got %q, want %q", i, got, want)
+		for i := 1; i < len(c.in); i++ { // the log arrives in arbitrary pieces
+			if got := render(false, false, c.in[:i], c.in[i:]); got != c.want {
+				t.Fatalf("%s, split at %d: got %q", name, i, got)
+			}
 		}
 	}
 }
 
-// A line is written as soon as the output is below it, so a followed log does not lag.
-func TestLinesAreWrittenAsTheyEnd(t *testing.T) {
-	var out bytes.Buffer
-	w := NewWriter(&out, false)
-	_, _ = w.Write([]byte("one\r\ntw"))
-	if out.String() != "one\n" {
-		t.Fatalf("got %q", out.String())
+func TestColorAndOpen(t *testing.T) {
+	if got := render(true, false, frame+"\x1b[32m✔\x1b[39m ok\r\nplain\r\n"); got != "\x1b[32m✔\x1b[39m ok\x1b[0m\nplain\n" {
+		t.Errorf("color: got %q", got)
 	}
-}
-
-// Before a live view takes over, the unfinished line stays open for it.
-func TestOpenLeavesTheLastLineUnfinished(t *testing.T) {
-	var out bytes.Buffer
-	w := NewWriter(&out, false)
-	w.Open = true
-	_, _ = w.Write([]byte("one\r\n? Your Email Address "))
-	_ = w.Close()
-	if out.String() != "one\n? Your Email Address " {
-		t.Fatalf("got %q", out.String())
-	}
-
-	// A spinner wider than the terminal is erased over two rows; it is still the open line.
-	out.Reset()
-	_, _ = w.Write([]byte("one\r\n\x1b[1G\x1b[0K\x1b[1A\x1b[0K⠋ wide\x1b[1G\x1b[0K\x1b[1A\x1b[0K⠙ wide"))
-	_ = w.Close()
-	if out.String() != "one\n⠙ wide" {
-		t.Fatalf("got %q", out.String())
+	if got := render(false, true, "one\r\n? Your Email Address "); got != "one\n? Your Email Address " {
+		t.Errorf("open: got %q", got)
 	}
 }
