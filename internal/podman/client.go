@@ -143,6 +143,7 @@ type Spec struct {
 	Network    string
 	Ports      []Port
 	LogSizeMax int64
+	Terminal   bool // a terminal, with stdin open
 }
 
 func (c *Client) CreateContainer(ctx context.Context, s Spec) error {
@@ -159,8 +160,19 @@ func (c *Client) CreateContainer(ctx context.Context, s Spec) error {
 		"restart_policy": "no",
 		// k8s-file honors the size cap; journald ignores it.
 		"log_configuration": map[string]any{"driver": "k8s-file", "size": s.LogSizeMax},
+		"terminal":          s.Terminal, "stdin": s.Terminal,
 	}
 	return c.call(ctx, http.MethodPost, "/containers/create", nil, body, nil)
+}
+
+// InitContainer prepares the container without starting its process: its terminal can then be sized.
+func (c *Client) InitContainer(ctx context.Context, name string) error {
+	return c.call(ctx, http.MethodPost, "/containers/"+url.PathEscape(name)+"/init", nil, nil, nil)
+}
+
+func (c *Client) ResizeTTY(ctx context.Context, name string, cols, rows int) error {
+	q := url.Values{"w": {strconv.Itoa(cols)}, "h": {strconv.Itoa(rows)}}
+	return c.call(ctx, http.MethodPost, "/containers/"+url.PathEscape(name)+"/resize", q, nil, nil)
 }
 
 func (c *Client) StartContainer(ctx context.Context, name string) error {
@@ -172,12 +184,15 @@ func (c *Client) StopContainer(ctx context.Context, name string, timeout time.Du
 	return c.call(ctx, http.MethodPost, "/containers/"+url.PathEscape(name)+"/stop", q, nil, nil)
 }
 
-// Logs writes the container's last tail lines (all when 0) to w, and keeps following when follow
-// is set, until ctx ends.
-func (c *Client) Logs(ctx context.Context, name string, tail int, follow bool, w io.Writer) error {
+// Logs writes the container's last tail lines (all when 0) to w, or what it wrote since a time,
+// and keeps following when follow is set, until ctx ends.
+func (c *Client) Logs(ctx context.Context, name string, tail int, since time.Time, follow bool, w io.Writer) error {
 	q := url.Values{"stdout": {"true"}, "stderr": {"true"}, "follow": {strconv.FormatBool(follow)}}
 	if tail > 0 {
 		q.Set("tail", strconv.Itoa(tail))
+	}
+	if !since.IsZero() {
+		q.Set("since", fmt.Sprintf("%d.%09d", since.Unix(), since.Nanosecond()))
 	}
 	resp, err := c.do(ctx, http.MethodGet, "/containers/"+url.PathEscape(name)+"/logs", q, nil)
 	if err != nil {

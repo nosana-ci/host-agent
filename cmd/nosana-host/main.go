@@ -27,8 +27,6 @@ import (
 	"github.com/nosana-ci/host-agent/internal/keys"
 	"github.com/nosana-ci/host-agent/internal/legacy"
 	"github.com/nosana-ci/host-agent/internal/local"
-	"github.com/nosana-ci/host-agent/internal/node"
-	"github.com/nosana-ci/host-agent/internal/podman"
 	"github.com/nosana-ci/host-agent/internal/service"
 	"github.com/nosana-ci/host-agent/internal/store"
 	"github.com/nosana-ci/host-agent/internal/version"
@@ -37,13 +35,15 @@ import (
 const usage = `nosana-host runs the Nosana node on this machine and reports to host-manager.
 
 Usage:
-  nosana-host install --control-url URL --release-url URL --network mainnet|devnet [--token T] [--hold]
-                                        install or repair (sudo); --hold leaves the agent stopped until node import gives it its key
+  nosana-host install --control-url URL --release-url URL --network mainnet|devnet [--token T] [--import-key KEY] [--hold]
+                                        install or repair (sudo); --import-key makes KEY the node wallet, as node import does;
+                                        --hold leaves the agent stopped until node import gives it its key
   nosana-host uninstall [--purge]       remove the services; --purge also deletes state after backing the wallet up (sudo)
   nosana-host status                    link, wallet, node, GPU, disk, checks and update state
   nosana-host logs [node|agent|podman|job ID] [-f] [-n N]   the node container's log, a journal, or a job's container
   nosana-host doctor [--fix ID|all] [--yes]   run the host checks; --fix applies the fix of one check, or of every check that has one
   nosana-host node start|stop|restart   the node container; a stopped node stays stopped until started
+  nosana-host node attach               the node's terminal, with its keys (sudo); Ctrl+C leaves, the node keeps running
   nosana-host node import KEY           make KEY the node wallet (sudo); takes over the node that runs in docker with it (start.sh)
   nosana-host node find                 the nodes that run in docker on this machine: address and key file
   nosana-host update [--check]          install the current release now, also while the node is busy; --check only looks
@@ -124,8 +124,24 @@ func cmdInstall(args []string) error {
 	var opts install.Options
 	fs.StringVar(&opts.Token, "token", "", "claim token from the console's install command")
 	fs.BoolVar(&opts.Hold, "hold", false, "leave the agent stopped, without a node wallet, until node import gives it its key")
+	fs.StringVar(&opts.ImportKey, "import-key", "", "key file that becomes the node wallet; takes over the node that runs in docker with it")
 	_ = fs.Parse(args)
+	opts.Ask = askTerminal()
 	return install.Run(context.Background(), cfg, opts, os.Stdout)
+}
+
+// askTerminal asks a yes or no question on the terminal (stdin is install.sh's pipe); nil without one.
+func askTerminal() func(question string) bool {
+	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err != nil {
+		return nil
+	}
+	in := bufio.NewReader(tty)
+	return func(question string) bool {
+		fmt.Fprintf(tty, "  %s [Y/n] ", question)
+		answer, err := in.ReadString('\n')
+		return err == nil && !strings.HasPrefix(strings.ToLower(strings.TrimSpace(answer)), "n")
+	}
 }
 
 // cmdStatus shows what the console's host page shows, a row per item; a row with an empty label
@@ -418,17 +434,18 @@ func cmdLogs(args []string) error {
 	_ = fs.Parse(args)
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	if what == "node" {
+		if err := nodeLog(ctx, *tail, *follow); err != nil && ctx.Err() == nil {
+			return err
+		}
+		return nil
+	}
 	body, err := local.Call(ctx, http.MethodGet, fmt.Sprintf("%s?tail=%d&follow=%t", path, *tail, *follow), nil)
 	switch {
 	case errors.Is(err, local.ErrNotRunning) && what == "agent": // the journal says why it is down
 		err = service.Journal(ctx, service.AgentUnit, *tail, *follow, os.Stdout)
 	case errors.Is(err, local.ErrNotRunning) && what == "podman":
 		err = service.Journal(ctx, service.PodmanUnit, *tail, *follow, os.Stdout)
-	case errors.Is(err, local.ErrNotRunning) && what == "node":
-		err = podman.New(config.PodmanSocket).Logs(ctx, node.ContainerName, *tail, *follow, os.Stdout)
-		if errors.Is(err, os.ErrPermission) {
-			err = errors.New("the agent is not running; podman's socket is root's: sudo nosana-host logs node")
-		}
 	case err != nil:
 		return err
 	default:
@@ -572,8 +589,10 @@ func cmdNode(args []string) error {
 		return nil
 	case len(args) == 1 && (args[0] == "start" || args[0] == "stop" || args[0] == "restart"):
 		return cmdCommand(args[0] + "-node")
+	case len(args) == 1 && args[0] == "attach":
+		return nodeAttach()
 	}
-	return errors.New("usage: nosana-host node start|stop|restart|find, or node import KEY")
+	return errors.New("usage: nosana-host node start|stop|restart|attach|find, or node import KEY")
 }
 
 // agreementURL is the Participation Agreement the node asks a host to accept on its first start.

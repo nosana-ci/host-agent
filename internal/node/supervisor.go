@@ -27,7 +27,7 @@ const (
 	apiPort       = 15001 // the node's port 5001, published on localhost
 	LabelImage    = "io.nosana.host.image"
 	labelNetwork  = "io.nosana.host.network"
-	logSizeMax    = 10 << 20
+	logSizeMax    = 200 << 20 // on a terminal every spinner frame is logged: some 350 MB a day
 	tick          = 5 * time.Second
 	stopTimeout   = 2 * time.Minute
 	maxBackoff    = 5 * time.Minute
@@ -272,7 +272,7 @@ func (s *Supervisor) reconcile(ctx context.Context) error {
 			return err
 		}
 		s.restartDone() // only once it happened; podman may have been away
-		return s.pc.StartContainer(ctx, ContainerName)
+		return s.startContainer(ctx)
 
 	case image != "" && (ctr.Config.Labels[LabelImage] != image || ctr.Config.Labels[labelNetwork] != s.network) && (swapNow || s.MayInterrupt()):
 		pulled, err := s.ensureImage(ctx, image) // the node keeps running during the pull
@@ -302,6 +302,18 @@ func (s *Supervisor) reconcile(ctx context.Context) error {
 	return s.restartExited(ctx, ctr.State.ExitCode)
 }
 
+// startContainer starts the node. Its terminal is sized before its process runs: without a size
+// the node's spinners flood the log.
+func (s *Supervisor) startContainer(ctx context.Context) error {
+	if err := s.pc.InitContainer(ctx, ContainerName); err != nil {
+		return fmt.Errorf("init node container: %w", err)
+	}
+	if err := s.pc.ResizeTTY(ctx, ContainerName, 120, 40); err != nil {
+		return fmt.Errorf("size the node's terminal: %w", err)
+	}
+	return s.pc.StartContainer(ctx, ContainerName)
+}
+
 // restartExited starts an exited node again: at once when it asked for it or the owner started
 // it, otherwise with a backoff that doubles per crash.
 func (s *Supervisor) restartExited(ctx context.Context, code int) error {
@@ -310,7 +322,7 @@ func (s *Supervisor) restartExited(ctx context.Context, code int) error {
 		s.start = false
 		s.mu.Unlock()
 		slog.Info("node: starting", "exitCode", code)
-		return s.pc.StartContainer(ctx, ContainerName)
+		return s.startContainer(ctx)
 	}
 	if s.nextStart.IsZero() {
 		s.crashes++
@@ -332,7 +344,7 @@ func (s *Supervisor) restartExited(ctx context.Context, code int) error {
 	if !due {
 		return nil
 	}
-	return s.pc.StartContainer(ctx, ContainerName)
+	return s.startContainer(ctx)
 }
 
 func (s *Supervisor) create(ctx context.Context, image string) error {
@@ -355,12 +367,13 @@ func (s *Supervisor) create(ctx context.Context, image string) error {
 		Network:    networkName,
 		Ports:      []podman.Port{{HostIP: "127.0.0.1", HostPort: apiPort, ContainerPort: 5001, Protocol: "tcp"}},
 		LogSizeMax: logSizeMax,
+		Terminal:   true,
 	}
 	if err := s.pc.CreateContainer(ctx, spec); err != nil {
 		return fmt.Errorf("create node container: %w", err)
 	}
 	slog.Info("node: created and starting", "image", image)
-	return s.pc.StartContainer(ctx, ContainerName)
+	return s.startContainer(ctx)
 }
 
 // ensureImage pulls image when it is not here yet and reports whether it did.

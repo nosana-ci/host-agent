@@ -35,9 +35,11 @@ job (a `drain` file in its config folder; an older node is stopped the moment it
 jobs), stops its container (only one whose `/root/.nosana` holds this key) and drops its restart
 policy, and starts its own node once the old one no longer answers at the node's public domain. From then on it
 stops the old node whenever it runs again (the market queue holds one node per key).
-`sudo nosana-host uninstall` and the `start.sh` command undo it. The install script finds such a
-node (`nosana-host node find`) and offers to move it; it then installs with `--hold`, which leaves
-the agent stopped and disabled without a wallet, and imports the key.
+`sudo nosana-host uninstall` and the `start.sh` command undo it. `nosana-host install` finds such a
+node and, on a terminal, offers to move it (`--import-key KEY` moves it without asking; otherwise
+the install stops, as two nodes would share the GPU). With no node in docker it offers the key an
+earlier node left in `~/.nosana`. With a key it installs with `--hold`, which leaves the agent
+stopped and disabled without a wallet, and imports the key.
 
 Supported: Ubuntu 22.04/24.04/26.04 and Debian 12/13 on x86-64, with the NVIDIA driver (R550 or
 newer), nvidia-container-toolkit and a CDI spec for the GPU; the console's health panel shows
@@ -48,6 +50,7 @@ nosana-host status                 # what the console's host page shows: network
 nosana-host logs [node|agent|podman|job ID] -f   # the node container's log, a journal, or a job's container
 nosana-host doctor [--fix ID|all] [--yes]   # the host checks; --fix applies the fix of one check, or every fix there is
 nosana-host node start|stop|restart   # the node container, like the console's buttons
+sudo nosana-host node attach       # the node's terminal, with its keys (s: shut down after the job); Ctrl+C leaves, the node keeps running
 nosana-host update [--check]       # install the current release now; --check only looks
 nosana-host config [set auto-update on|off]   # the settings and the install's values
 nosana-host register [--show]      # the node's email (and Discord, Twitter) and the Participation Agreement; shows and changes them later
@@ -72,6 +75,12 @@ Install script: `host-console/static/install.sh`.
   socket next to it, port 5001 on `127.0.0.1:15001` for `/node/info`), restarts it when it asks
   (exit 129) or with a backoff when it crashes, keeps it stopped when the owner said so, and swaps
   the image when the release changes it and the node may be interrupted (see Updates).
+- **The node's terminal.** The container has a terminal, as under start.sh, so the node draws its
+  spinners and reads keys. The agent sizes it (120x40) before the node's process starts: without
+  a size the spinners flood the log. The log holds every spinner frame (some 350 MB a day, capped
+  at 200 MB): `logs node` writes it as the lines the node left, and `logs node -f` on a terminal
+  then shows what the node draws. `sudo nosana-host node attach` is podman's attach, with Ctrl+C
+  as its detach key; it first waits for a node that is starting.
 - **Heartbeat.** Every 15 s: agent version, the commands it accepts and its settings, update state,
   node state, GPU, disk, the host checks, the runtime, the network and the node wallet's SOL and NOS
   balances (read every minute from the Nosana kit's default RPC: Nosana's Ironforge endpoint on

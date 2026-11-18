@@ -143,6 +143,16 @@ func (d *daemon) localHandler() http.Handler {
 	mux.HandleFunc("GET /logs/job/{id}", func(w http.ResponseWriter, r *http.Request) {
 		d.logs(w, r, "job", r.PathValue("id"))
 	})
+	// The size of the terminal that watches the node, so its spinners fit there.
+	mux.HandleFunc("POST /node/resize", func(w http.ResponseWriter, r *http.Request) {
+		cols, _ := strconv.Atoi(r.URL.Query().Get("w"))
+		rows, _ := strconv.Atoi(r.URL.Query().Get("h"))
+		if cols < 1 || rows < 1 {
+			http.Error(w, "w and h are the terminal's columns and rows", http.StatusBadRequest)
+		} else if err := d.pc.ResizeTTY(r.Context(), node.ContainerName, cols, rows); err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+		}
+	})
 	return mux
 }
 
@@ -151,13 +161,17 @@ func (d *daemon) localHandler() http.Handler {
 func (d *daemon) logs(w http.ResponseWriter, r *http.Request, what, jobID string) {
 	tail, _ := strconv.Atoi(r.URL.Query().Get("tail")) // 0 or missing: everything
 	follow := r.URL.Query().Get("follow") == "true"
+	var since time.Time // Unix nanoseconds: a container's log from then on
+	if ns, err := strconv.ParseInt(r.URL.Query().Get("since"), 10, 64); err == nil {
+		since = time.Unix(0, ns)
+	}
 	out := flushWriter{w}
 	var err error
 	switch what {
 	case "node":
-		err = d.pc.Logs(r.Context(), node.ContainerName, tail, follow, out)
+		err = d.pc.Logs(r.Context(), node.ContainerName, tail, since, follow, out)
 	case "job":
-		err = d.pc.Logs(r.Context(), jobID+"-0", tail, follow, out)
+		err = d.pc.Logs(r.Context(), jobID+"-0", tail, since, follow, out)
 	case "agent":
 		err = service.Journal(r.Context(), service.AgentUnit, tail, follow, out)
 	case "podman":
