@@ -37,6 +37,12 @@ type Options struct {
 	// import to start it with its key: the agent would otherwise make a wallet, also at a reboot,
 	// and link that one with Token.
 	Hold bool
+	// ImportKey is a key file that becomes the node wallet with this install: the agent is
+	// installed held, and the key imported (see Import).
+	ImportKey string
+	// Ask asks a yes or no question on the terminal; nil without one. With it, a node found in
+	// docker or the key of an earlier node is offered as ImportKey.
+	Ask func(question string) bool
 }
 
 // Run installs or repairs the agent. Fields set in given replace the saved config.
@@ -56,11 +62,20 @@ func Run(ctx context.Context, given config.Config, opts Options, out io.Writer) 
 	if cfg.ControlURL == "" || cfg.ReleaseURL == "" || (cfg.Network != "mainnet" && cfg.Network != "devnet") {
 		return errors.New("--control-url, --release-url and --network (mainnet or devnet) are required on a first install")
 	}
+	// Before anything changes: which key the node gets. With one, the agent is installed without
+	// starting it, as it would otherwise make a wallet of its own and link that one to the account.
+	_, walletErr := os.Stat(config.WalletPath)
+	key, err := chooseKey(opts, legacy.Find(ctx), earlierKey(), walletErr == nil, say)
+	if err != nil {
+		return err
+	}
+	opts.Hold = opts.Hold || key != ""
+	held := false // the install is done and the key's import took over
 	if loadErr == nil {
 		say("found an existing install, repairing it")
 		_ = service.Systemctl("stop", service.AgentUnit) // it would overwrite the state we change
 		defer func() {
-			if err != nil {
+			if err != nil && !held {
 				_ = service.Systemctl("start", service.AgentUnit)
 			}
 		}()
@@ -162,6 +177,10 @@ func Run(ctx context.Context, given config.Config, opts Options, out io.Writer) 
 			return err
 		}
 	}
+	if key != "" {
+		held = true // an import that fails leaves the agent stopped, not started on a wallet of its own
+		return Import(ctx, key, out)
+	}
 	if opts.Hold {
 		say("installed; the agent starts once it has its node key: sudo nosana-host node import KEY")
 		return nil
@@ -169,6 +188,56 @@ func Run(ctx context.Context, given config.Config, opts Options, out io.Writer) 
 	say("services started")
 	fmt.Fprintln(out, "\nDone. Follow the agent with: journalctl -u nosana-host -f")
 	return nil
+}
+
+// chooseKey is the key file that becomes the node wallet with this install, or "" for the wallet
+// the agent has or makes. The key given with --import-key goes first. A node that runs in docker
+// on this machine has to move to the agent with its key, since two nodes would share the GPU:
+// offered on a terminal when it is the only one, and otherwise the install stops. When none runs,
+// the key an earlier node left in ~/.nosana is offered to an agent that has no wallet yet.
+func chooseKey(opts Options, found []legacy.Node, earlier string, haveWallet bool, say func(string, ...any)) (string, error) {
+	if opts.ImportKey != "" {
+		if _, err := keys.Read(opts.ImportKey); err != nil {
+			return "", fmt.Errorf("--import-key: %w", err)
+		}
+		return opts.ImportKey, nil
+	}
+	if len(found) > 0 {
+		if len(found) == 1 && opts.Ask != nil {
+			say("node %s runs in docker on this machine (key %s)", found[0].Address, found[0].KeyPath)
+			if opts.Ask("Move it to the agent? It keeps its address and market; a job that runs is finished first.") {
+				return found[0].KeyPath, nil
+			}
+		}
+		var list strings.Builder
+		for _, n := range found {
+			fmt.Fprintf(&list, "\n  %s %s", n.Address, n.KeyPath)
+		}
+		return "", fmt.Errorf("a node runs in docker on this machine (address, key file):%s\nmove it with --import-key <key file>, or stop it before installing", list.String())
+	}
+	if earlier != "" && !haveWallet && opts.Ask != nil {
+		say("found the key of an earlier node: %s", earlier)
+		if opts.Ask("Use it for this host? The node keeps its address; otherwise the agent makes a new wallet.") {
+			return earlier, nil
+		}
+	}
+	return "", nil
+}
+
+// earlierKey is the key file an earlier node left in ~/.nosana of the user who ran sudo, or of
+// root; "" when there is none that reads as a key.
+func earlierKey() string {
+	homes := []string{"/root"}
+	if u, err := user.Lookup(os.Getenv("SUDO_USER")); err == nil {
+		homes = []string{u.HomeDir, "/root"}
+	}
+	for _, home := range homes {
+		path := filepath.Join(home, ".nosana", "nosana_key.json")
+		if _, err := keys.Read(path); err == nil {
+			return path
+		}
+	}
+	return ""
 }
 
 // Uninstall stops and removes the services; purge also deletes the state after backing the

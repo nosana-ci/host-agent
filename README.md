@@ -35,9 +35,13 @@ job (a `drain` file in its config folder; an older node is stopped the moment it
 jobs), stops its container (only one whose `/root/.nosana` holds this key) and drops its restart
 policy, and starts its own node once the old one no longer answers at the node's public domain. From then on it
 stops the old node whenever it runs again (the market queue holds one node per key).
-`sudo nosana-host uninstall` and the `start.sh` command undo it. The install script finds such a
-node (`nosana-host node find`) and offers to move it; it then installs with `--hold`, which leaves
-the agent stopped and disabled without a wallet, and imports the key.
+`sudo nosana-host uninstall` and the `start.sh` command undo it. `nosana-host install` finds such a
+node itself and, on a terminal, offers to move it; `--import-key KEY` moves it without asking, and
+an install with a node in docker that is not moved stops, since two nodes would share the GPU. When
+none runs, the key an earlier node left in `~/.nosana` (of the user who ran sudo, or of root) is
+offered to an agent that has no wallet yet. With a key, the agent is installed held (`--hold`:
+stopped and disabled, without a wallet, so it does not make one and link that to the account), and
+the key is then imported. The install script only passes its arguments on.
 
 Supported: Ubuntu 22.04/24.04/26.04 and Debian 12/13 on x86-64, with the NVIDIA driver (R550 or
 newer), nvidia-container-toolkit and a CDI spec for the GPU; the console's health panel shows

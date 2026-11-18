@@ -35,8 +35,10 @@ import (
 const usage = `nosana-host runs the Nosana node on this machine and reports to host-manager.
 
 Usage:
-  nosana-host install --control-url URL --release-url URL --network mainnet|devnet [--token T] [--hold]
-                                        install or repair (sudo); --hold leaves the agent stopped until node import gives it its key
+  nosana-host install --control-url URL --release-url URL --network mainnet|devnet [--token T] [--import-key KEY] [--hold]
+                                        install or repair (sudo). A node that runs in docker here has to move to the agent with its
+                                        key: asked on a terminal, or --import-key KEY; the key of an earlier node in ~/.nosana is
+                                        offered too. --hold leaves the agent stopped until node import gives it its key
   nosana-host uninstall [--purge]       remove the services; --purge also deletes state after backing the wallet up (sudo)
   nosana-host status                    link, wallet, node, GPU, disk, checks and update state
   nosana-host logs [node|agent|podman|job ID] [-f] [-n N]   the node container's log, a journal, or a job's container;
@@ -124,8 +126,26 @@ func cmdInstall(args []string) error {
 	var opts install.Options
 	fs.StringVar(&opts.Token, "token", "", "claim token from the console's install command")
 	fs.BoolVar(&opts.Hold, "hold", false, "leave the agent stopped, without a node wallet, until node import gives it its key")
+	fs.StringVar(&opts.ImportKey, "import-key", "", "key file that becomes the node wallet; takes over the node that runs in docker with it")
 	_ = fs.Parse(args)
+	opts.Ask = askTerminal()
 	return install.Run(context.Background(), cfg, opts, os.Stdout)
+}
+
+// askTerminal is a yes or no question on the controlling terminal, yes unless the answer starts
+// with n; nil when there is no terminal. Not stdin: install.sh pipes the script into the shell
+// that runs the install.
+func askTerminal() func(question string) bool {
+	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err != nil {
+		return nil
+	}
+	in := bufio.NewReader(tty)
+	return func(question string) bool {
+		fmt.Fprintf(tty, "  %s [Y/n] ", question)
+		answer, err := in.ReadString('\n')
+		return err == nil && !strings.HasPrefix(strings.ToLower(strings.TrimSpace(answer)), "n")
+	}
 }
 
 // cmdStatus shows what the console's host page shows, a row per item; a row with an empty label
