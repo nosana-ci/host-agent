@@ -24,6 +24,7 @@ const (
 const (
 	CheckStatusFail CheckStatus = "fail"
 	CheckStatusOk   CheckStatus = "ok"
+	CheckStatusSkip CheckStatus = "skip"
 	CheckStatusWarn CheckStatus = "warn"
 )
 

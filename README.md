@@ -103,7 +103,8 @@ Install script: `host-console/static/install.sh`.
   the richer `/node/info` (node MR !91); the agent does not read the node's log.
 - **Reach.** Every 2 minutes the agent asks the node's public domain
   (`https://<address>.node.k8s.<prd|dev>.nos.ci/node/info`) whether it answers for this node, the
-  way jobs reach it; the result is `node.reach` and the `node-domain` check.
+  way jobs reach it; the result is `node.reach` and the `node-domain` check, which is skipped
+  while the node is not running.
 - **Runtime storage.** Every minute podman's `system/df` is summed into `runtime.storage` (used,
   what prune would free, the images and containers). `prune-images` removes containers that are
   not running (the node's excepted) and images nothing uses; `reset-storage` stops the node, wipes

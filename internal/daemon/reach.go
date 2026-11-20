@@ -52,7 +52,7 @@ func probe(ctx context.Context, url, address string) api.ReachStatus {
 }
 
 // check turns the probe into a doctor check; a node that is not running cannot be reached, so
-// that is a warning rather than a failure.
+// the check is skipped then.
 func (r *reach) check(nodeRunning bool) *api.Check {
 	st := r.status()
 	if st == nil {
@@ -61,14 +61,15 @@ func (r *reach) check(nodeRunning bool) *api.Check {
 	group := "network"
 	c := api.Check{Id: "node-domain", Group: &group, Title: "Node reachable at its public domain", Status: api.CheckStatusOk}
 	detail := st.Url
-	if !st.Ok {
+	switch {
+	case st.Ok:
+	case nodeRunning:
 		detail += ": " + *st.Error
-		c.Status = api.CheckStatusWarn
-		if nodeRunning {
-			c.Status = api.CheckStatusFail
-			fix := "The node runs but the network cannot reach it: look for tunnel errors in nosana-host logs node; a node restart usually sets it up again."
-			c.Fix = &fix
-		}
+		c.Status = api.CheckStatusFail
+		fix := "The node runs but the network cannot reach it: look for tunnel errors in nosana-host logs node; a node restart usually sets it up again."
+		c.Fix = &fix
+	default:
+		c.Status, detail = api.CheckStatusSkip, "the node is not running"
 	}
 	c.Detail = &detail
 	return &c
