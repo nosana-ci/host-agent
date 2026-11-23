@@ -90,18 +90,27 @@ func run(ctx context.Context, name string, args ...string) error {
 	return nil
 }
 
-// Summary is one line about the checks: all passed, or which need attention.
+// Summary is one line about the checks: all passed, or which need attention; a skipped check
+// does not.
 func Summary(checks []api.Check) string {
 	var failing []string
+	skipped := 0
 	for _, c := range checks {
-		if c.Status != api.CheckStatusOk {
+		switch c.Status {
+		case api.CheckStatusOk:
+		case api.CheckStatusSkip:
+			skipped++
+		default:
 			failing = append(failing, c.Title)
 		}
 	}
-	if len(failing) == 0 {
-		return fmt.Sprintf("%d checks passed", len(checks))
+	switch {
+	case len(failing) > 0:
+		return fmt.Sprintf("%d of %d checks need attention: %s", len(failing), len(checks), strings.Join(failing, ", "))
+	case skipped > 0:
+		return fmt.Sprintf("%d of %d checks passed, %d skipped", len(checks)-skipped, len(checks), skipped)
 	}
-	return fmt.Sprintf("%d of %d checks need attention: %s", len(failing), len(checks), strings.Join(failing, ", "))
+	return fmt.Sprintf("%d checks passed", len(checks))
 }
 
 func Fix(ctx context.Context, id string) error {
