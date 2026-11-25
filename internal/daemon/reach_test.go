@@ -75,3 +75,20 @@ func TestReachFailsOnlyTwiceInARow(t *testing.T) {
 		t.Fatal("a node that closed its tunnel kept the old result")
 	}
 }
+
+func TestReachRefreshIgnoresTheSchedule(t *testing.T) {
+	ready := true
+	r, probes := fakeReach(&ready, false, false, true)
+	now := time.Now()
+	r.tick(context.Background(), now)
+	r.tick(context.Background(), now.Add(reachRetry)) // the check fails
+	r.refresh(context.Background(), now.Add(reachRetry+time.Second))
+	if c := r.check(true); *probes != 3 || c.Status != api.CheckStatusOk {
+		t.Fatalf("Run checks right after a failure: %d probes, %s; want a fresh probe, ok", *probes, c.Status)
+	}
+	ready = false
+	r.refresh(context.Background(), now.Add(time.Hour))
+	if *probes != 3 {
+		t.Fatal("probed a node without its tunnel")
+	}
+}

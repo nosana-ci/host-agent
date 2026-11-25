@@ -54,7 +54,15 @@ func (r *reach) tick(ctx context.Context, now time.Time) {
 	r.mu.Lock()
 	due := !now.Before(r.next)
 	r.mu.Unlock()
-	if !due {
+	if due {
+		r.refresh(ctx, now)
+	}
+}
+
+// refresh probes now, whatever the schedule, as the owner's Run checks asks: the check it shows
+// is fresh, not the result of the last scheduled probe.
+func (r *reach) refresh(ctx context.Context, now time.Time) {
+	if !r.ready() {
 		return
 	}
 	st := r.probe(ctx, r.url, r.address)
