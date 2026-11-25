@@ -72,6 +72,16 @@ func (i *Info) Activity() *api.NodeActivity {
 	return nil
 }
 
+// Opened reports whether the node opened its public tunnel (api-started) at or after since.
+func (i *Info) Opened(since time.Time) bool {
+	for _, h := range i.History {
+		if h.Status == "api-started" && !h.At.Before(since) {
+			return true
+		}
+	}
+	return false
+}
+
 // Prompt is "registration" while the node waits at its sign-up questions, which nobody answers
 // under the agent; the console offers the same sign-up instead.
 func (i *Info) Prompt() string {

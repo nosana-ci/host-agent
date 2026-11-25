@@ -79,7 +79,7 @@ func Run(ctx context.Context) error {
 		upd:     updater.New(cfg, st, sup, pc),
 		ctrl:    control.New(cfg.ControlURL, wallet),
 		bal:     bal,
-		reach:   &reach{url: node.Domain(cfg.Network, keys.Address(wallet)), address: keys.Address(wallet)},
+		reach:   newReach(node.Domain(cfg.Network, keys.Address(wallet)), keys.Address(wallet), sup.TunnelOpen),
 		storage: newStorage(pc),
 		cmds:    make(chan []job, 16),
 		auto:    cfg.AutoUpdateOn(),

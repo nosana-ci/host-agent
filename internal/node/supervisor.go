@@ -55,6 +55,8 @@ type Supervisor struct {
 	nextStart time.Time
 	swapNow   bool      // the owner asked for the update: the next image swap does not wait
 	eventsAt  time.Time // the newest node state change reported as an event
+	tunnelFor time.Time // the start of the container whose node opened its tunnel
+	tunnel    bool
 
 	// WaitingForSOL reports that the node wallet is below the SOL the node waits for at start.
 	WaitingForSOL func() bool
@@ -78,6 +80,18 @@ func (s *Supervisor) Status() api.NodeStatus {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.status
+}
+
+// tunnelGrace is how long a running node may take to open its tunnel; after it the domain is
+// checked anyway (a node that does not report api-started, or whose history dropped it).
+const tunnelGrace = 5 * time.Minute
+
+// TunnelOpen reports whether the running node opened its public tunnel, so its domain should
+// answer. Before that (pulling images, waiting for SOL) the domain answers 503.
+func (s *Supervisor) TunnelOpen() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.tunnel
 }
 
 // MayInterrupt reports whether a change that stops the node (a new image, a runtime switch) may
@@ -419,6 +433,7 @@ func (s *Supervisor) ensureNetwork(ctx context.Context) error {
 // observe refreshes the status from the container, its log and the node's own API.
 func (s *Supervisor) observe(ctx context.Context, ctr *podman.Container, image string) {
 	status := api.NodeStatus{Container: "missing", Image: image}
+	tunnel := false
 	if ctr == nil && image == "" {
 		status.Container = "unknown"
 	}
@@ -439,11 +454,16 @@ func (s *Supervisor) observe(ctx context.Context, ctr *podman.Container, image s
 				for _, e := range events {
 					s.st.Record("node", e.Level, "", "%s", e.Message)
 				}
+				if info.Opened(ctr.State.StartedAt) {
+					s.tunnelFor = ctr.State.StartedAt
+				}
 			}
+			started := ctr.State.StartedAt
+			tunnel = s.tunnelFor.Equal(started) || time.Since(started) > tunnelGrace
 		}
 	}
 	s.mu.Lock()
 	status.Desired, status.Restarts, status.LastError = s.status.Desired, s.status.Restarts, s.status.LastError
-	s.status, s.observed = status, true
+	s.status, s.observed, s.tunnel = status, true, tunnel
 	s.mu.Unlock()
 }

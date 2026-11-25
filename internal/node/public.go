@@ -19,7 +19,7 @@ func Domain(network, address string) string {
 	return fmt.Sprintf("https://%s.node.k8s.%s.nos.ci", address, cluster)
 }
 
-var publicClient = &http.Client{Timeout: 5 * time.Second}
+var publicClient = &http.Client{Timeout: 10 * time.Second} // through the tunnel a first answer can take 5 s
 
 // Public asks the node's public domain for /node/info and expects the node's own answer for
 // address. While the tunnel starts, something else answers with a placeholder page.
