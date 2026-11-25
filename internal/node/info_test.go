@@ -50,3 +50,16 @@ func TestActivityAndEventsFromNodeInfo(t *testing.T) {
 		t.Fatalf("prompt %q, activity %+v", info.Prompt(), info.Activity())
 	}
 }
+
+func TestOpened(t *testing.T) {
+	var info Info
+	if err := json.Unmarshal([]byte(`{"history":[{"status":"api-starting","at":"2026-11-25T14:40:21.801Z"},{"status":"api-started","at":"2026-11-25T14:40:27.000Z"}]}`), &info); err != nil {
+		t.Fatal(err)
+	}
+	if !info.Opened(time.Date(2026, 11, 25, 14, 40, 20, 0, time.UTC)) {
+		t.Fatal("api-started after the container started: the tunnel is open")
+	}
+	if info.Opened(time.Date(2026, 11, 25, 14, 50, 0, 0, time.UTC)) {
+		t.Fatal("api-started of an earlier container counted for this one")
+	}
+}

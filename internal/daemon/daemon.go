@@ -79,7 +79,7 @@ func Run(ctx context.Context) error {
 		upd:     updater.New(cfg, st, sup, pc),
 		ctrl:    control.New(cfg.ControlURL, wallet),
 		bal:     bal,
-		reach:   &reach{url: node.Domain(cfg.Network, keys.Address(wallet)), address: keys.Address(wallet)},
+		reach:   newReach(node.Domain(cfg.Network, keys.Address(wallet)), keys.Address(wallet), sup.TunnelOpen),
 		storage: newStorage(pc),
 		cmds:    make(chan []job, 16),
 		auto:    cfg.AutoUpdateOn(),
@@ -113,12 +113,15 @@ func (d *daemon) doctorLoop(ctx context.Context) {
 	}
 }
 
+// runDoctor runs the host checks and probes the node's domain again, and returns them all; the
+// domain check is kept by reach, the status adds it.
 func (d *daemon) runDoctor(ctx context.Context) []api.Check {
 	g, checks := doctor.Run(ctx, d.cfg, d.pc)
+	d.reach.refresh(ctx, time.Now())
 	d.mu.Lock()
 	d.gpu, d.checks = g, checks
 	d.mu.Unlock()
-	return checks
+	return append(checks[:len(checks):len(checks)], *d.reach.check(d.sup.Status().Container == "running"))
 }
 
 // heartbeatLoop claims the host while a claim token is saved, and otherwise reports the status
@@ -261,9 +264,7 @@ func (d *daemon) status(ctx context.Context) api.AgentStatus {
 	network := api.AgentStatusNetwork(d.cfg.Network)
 	n := d.sup.Status()
 	n.Reach = d.reach.status()
-	if c := d.reach.check(n.Container == "running"); c != nil {
-		checks = append(checks[:len(checks):len(checks)], *c)
-	}
+	checks = append(checks[:len(checks):len(checks)], *d.reach.check(n.Container == "running"))
 	return api.AgentStatus{
 		Version: 1,
 		Agent:   api.AgentInfo{Version: version.Version, Commands: d.verbs(), Update: d.upd.Status(), Settings: &settings},
